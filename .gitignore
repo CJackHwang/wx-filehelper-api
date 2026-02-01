@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.env
+.DS_Store
+state.json
+*.log
+playwright-report/
+test-results/
