@@ -346,41 +346,33 @@ async def root():
 
 @app.get("/qr")
 async def get_qr():
-    try:
-        if await wechat_bot.check_login_status(poll=False):
-            return Response(content="Already logged in. Use /send directly.", media_type="text/plain")
-
-        png_bytes = await wechat_bot.get_login_qr()
-        if not png_bytes:
-            return Response(content="Already logged in. Use /send directly.", media_type="text/plain")
-
-        return Response(content=png_bytes, media_type="image/png")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    """Alias for /wechat/qr"""
+    return await wechat_get_qr()
 
 
 @app.get("/login/status")
 async def login_status(auto_poll: bool = Query(default=True)):
-    if auto_poll:
-        await wechat_bot.check_login_status(poll=True)
-    return await wechat_bot.get_login_status_detail()
+    """Alias for /wechat/login/status"""
+    return await wechat_login_status(auto_poll)
 
 
 @app.post("/send")
 async def send_message_simple(msg: Message):
+    """Simple send endpoint - use /bot/sendMessage for standard API"""
     if not await wechat_bot.check_login_status(poll=False):
-        raise HTTPException(status_code=401, detail="Not logged in. Open /qr to login.")
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
     success = await wechat_bot.send_text(msg.content)
     if not success:
         raise HTTPException(status_code=500, detail="send_text failed")
-    return {"status": "sent", "content": msg.content}
+    return {"ok": True, "result": {"text": msg.content}}
 
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
+    """Upload and send file"""
     if not await wechat_bot.check_login_status(poll=False):
-        raise HTTPException(status_code=401, detail="Not logged in")
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
     suffix = os.path.splitext(file.filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -399,47 +391,38 @@ async def upload_file(file: UploadFile = File(...)):
 
 @app.get("/messages")
 async def get_messages(limit: int = Query(default=10, ge=1, le=100)):
+    """Get recent messages from memory cache"""
     messages = await wechat_bot.get_latest_messages(limit)
-    return {"messages": messages}
+    return {"ok": True, "result": messages}
 
 
 @app.post("/save_session")
 async def trigger_save_session():
-    success = await wechat_bot.save_session()
-    if not success:
-        raise HTTPException(status_code=500, detail="save_session failed")
-    return {"status": "saved"}
+    """Alias for /wechat/session/save"""
+    return await wechat_save_session()
 
 
-# === Telegram Bot API 兼容接口 ===
+# === Telegram Bot API ===
+# 标准实现，参数与返回格式与 Telegram 一致
+# 微信特有功能见下方 "WeChat 扩展" 部分
 
 @app.get("/bot/getUpdates")
 async def bot_get_updates(
-    offset: int = Query(default=0, description="从此 update_id 之后开始获取"),
-    limit: int = Query(default=100, ge=1, le=1000),
-    timeout: int = Query(default=0, description="Long polling 超时 (暂不支持)"),
+    offset: int = Query(default=0),
+    limit: int = Query(default=100, ge=1, le=100),
+    timeout: int = Query(default=0),
+    allowed_updates: list[str] | None = Query(default=None),
 ):
-    """
-    Telegram getUpdates 风格 API
-
-    获取新消息更新，支持 offset 分页
-    """
+    """https://core.telegram.org/bots/api#getupdates"""
     updates = command_processor.get_updates(offset=offset, limit=limit)
-    return {
-        "ok": True,
-        "result": updates,
-    }
+    return {"ok": True, "result": updates}
 
 
 @app.post("/bot/sendMessage")
 async def bot_send_message(payload: SendMessagePayload):
-    """
-    Telegram sendMessage 风格 API
-
-    完全兼容 TG Bot API 参数
-    """
+    """https://core.telegram.org/bots/api#sendmessage"""
     if not await wechat_bot.check_login_status(poll=False):
-        return {"ok": False, "error_code": 401, "description": "Not logged in"}
+        return {"ok": False, "error_code": 401, "description": "Unauthorized"}
 
     reply_to = str(payload.reply_to_message_id) if payload.reply_to_message_id else None
     result = await command_processor.send_message(
@@ -451,18 +434,13 @@ async def bot_send_message(payload: SendMessagePayload):
 
 @app.post("/bot/sendDocument")
 async def bot_send_document(payload: SendDocumentPayload):
-    """
-    Telegram sendDocument 风格 API
-
-    支持 document (TG原生) 或 file_path (本框架扩展)
-    """
+    """https://core.telegram.org/bots/api#senddocument"""
     if not await wechat_bot.check_login_status(poll=False):
-        return {"ok": False, "error_code": 401, "description": "Not logged in"}
+        return {"ok": False, "error_code": 401, "description": "Unauthorized"}
 
-    # 优先使用 file_path，其次使用 document
-    file_path = payload.file_path or payload.document
+    file_path = payload.document or payload.file_path
     if not file_path:
-        return {"ok": False, "error_code": 400, "description": "file_path or document required"}
+        return {"ok": False, "error_code": 400, "description": "Bad Request: document is required"}
 
     reply_to = str(payload.reply_to_message_id) if payload.reply_to_message_id else None
     result = await command_processor.send_document(
@@ -470,7 +448,6 @@ async def bot_send_document(payload: SendDocumentPayload):
         reply_to_message_id=reply_to,
     )
 
-    # 如果有 caption，额外发送文字说明
     if result.get("ok") and payload.caption:
         await command_processor.send_message(text=payload.caption)
 
@@ -479,17 +456,13 @@ async def bot_send_document(payload: SendDocumentPayload):
 
 @app.post("/bot/sendPhoto")
 async def bot_send_photo(payload: SendPhotoPayload):
-    """
-    Telegram sendPhoto 风格 API
-
-    发送图片文件
-    """
+    """https://core.telegram.org/bots/api#sendphoto"""
     if not await wechat_bot.check_login_status(poll=False):
-        return {"ok": False, "error_code": 401, "description": "Not logged in"}
+        return {"ok": False, "error_code": 401, "description": "Unauthorized"}
 
-    file_path = payload.file_path or payload.photo
+    file_path = payload.photo or payload.file_path
     if not file_path:
-        return {"ok": False, "error_code": 400, "description": "file_path or photo required"}
+        return {"ok": False, "error_code": 400, "description": "Bad Request: photo is required"}
 
     reply_to = str(payload.reply_to_message_id) if payload.reply_to_message_id else None
     result = await command_processor.send_document(
@@ -505,14 +478,15 @@ async def bot_send_photo(payload: SendPhotoPayload):
 
 @app.get("/bot/getMe")
 async def bot_get_me():
-    """Telegram getMe 风格 API"""
+    """https://core.telegram.org/bots/api#getme"""
     return {
         "ok": True,
         "result": {
-            "id": wechat_bot.uin or "unknown",
+            "id": int(wechat_bot.uin) if wechat_bot.uin and wechat_bot.uin.isdigit() else 0,
             "is_bot": True,
-            "first_name": "FileHelper",
+            "first_name": "文件传输助手",
             "username": "filehelper",
+            "can_join_groups": False,
             "can_read_all_group_messages": False,
             "supports_inline_queries": False,
         },
@@ -521,63 +495,62 @@ async def bot_get_me():
 
 @app.get("/bot/getChat")
 async def bot_get_chat(chat_id: str | int | None = Query(default=None)):
-    """Telegram getChat 风格 API - 返回 filehelper 信息"""
+    """https://core.telegram.org/bots/api#getchat"""
     return {
         "ok": True,
         "result": {
-            "id": "filehelper",
+            "id": int(wechat_bot.uin) if wechat_bot.uin and wechat_bot.uin.isdigit() else 0,
             "type": "private",
-            "title": "文件传输助手",
+            "first_name": "文件传输助手",
             "username": "filehelper",
         },
     }
 
 
 @app.post("/bot/setWebhook")
-async def bot_set_webhook(url: str = "", secret_token: str | None = None):
-    """
-    Telegram setWebhook 风格 API
-
-    设置消息推送 Webhook (运行时生效，重启后需重新设置)
-    """
+async def bot_set_webhook(
+    url: str = "",
+    certificate: str | None = None,
+    ip_address: str | None = None,
+    max_connections: int = 40,
+    allowed_updates: list[str] | None = None,
+    drop_pending_updates: bool = False,
+    secret_token: str | None = None,
+):
+    """https://core.telegram.org/bots/api#setwebhook"""
     command_processor.message_webhook_url = url.strip()
-    return {
-        "ok": True,
-        "result": True,
-        "description": f"Webhook {'set to ' + url if url else 'removed'}",
-    }
+    return {"ok": True, "result": True, "description": "Webhook was set"}
 
 
 @app.post("/bot/deleteWebhook")
-async def bot_delete_webhook():
-    """Telegram deleteWebhook 风格 API"""
+async def bot_delete_webhook(drop_pending_updates: bool = False):
+    """https://core.telegram.org/bots/api#deletewebhook"""
     command_processor.message_webhook_url = ""
-    return {"ok": True, "result": True, "description": "Webhook removed"}
+    return {"ok": True, "result": True}
 
 
 @app.get("/bot/getWebhookInfo")
 async def bot_get_webhook_info():
-    """Telegram getWebhookInfo 风格 API"""
+    """https://core.telegram.org/bots/api#getwebhookinfo"""
+    url = command_processor.message_webhook_url
     return {
         "ok": True,
         "result": {
-            "url": command_processor.message_webhook_url,
+            "url": url,
             "has_custom_certificate": False,
             "pending_update_count": 0,
+            "max_connections": 40,
+            "ip_address": None,
         },
     }
 
 
 @app.get("/bot/getFile")
 async def bot_get_file(file_id: str = Query(...)):
-    """
-    Telegram getFile 风格 API
-
-    通过消息ID获取文件下载路径
-    """
+    """https://core.telegram.org/bots/api#getfile"""
     file_info = command_processor.message_store.get_file_by_msg_id(file_id)
     if not file_info:
-        return {"ok": False, "error_code": 404, "description": "File not found"}
+        return {"ok": False, "error_code": 400, "description": "Bad Request: file not found"}
 
     return {
         "ok": True,
@@ -590,23 +563,36 @@ async def bot_get_file(file_id: str = Query(...)):
     }
 
 
-@app.get("/bot/getMessage")
-async def bot_get_message(message_id: str = Query(...)):
-    """按消息ID查询消息"""
-    msg = command_processor.message_store.get_message(message_id)
-    if not msg:
-        return {"ok": False, "error_code": 404, "description": "Message not found"}
+# === WeChat 扩展 API ===
+# 以下接口为微信特有功能，Telegram 无对应接口
 
-    return {
-        "ok": True,
-        "result": {
-            "message_id": msg.msg_id,
-            "date": msg.timestamp,
-            "text": msg.text,
-            "type": msg.type,
-            "reply_to_message_id": msg.reply_to_id,
-        },
-    }
+@app.get("/wechat/qr")
+async def wechat_get_qr():
+    """[WeChat] 获取登录二维码"""
+    try:
+        if await wechat_bot.check_login_status(poll=False):
+            return Response(content="Already logged in", media_type="text/plain")
+        png_bytes = await wechat_bot.get_login_qr()
+        if not png_bytes:
+            return Response(content="Already logged in", media_type="text/plain")
+        return Response(content=png_bytes, media_type="image/png")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/wechat/login/status")
+async def wechat_login_status(auto_poll: bool = Query(default=True)):
+    """[WeChat] 获取登录状态"""
+    if auto_poll:
+        await wechat_bot.check_login_status(poll=True)
+    return await wechat_bot.get_login_status_detail()
+
+
+@app.post("/wechat/session/save")
+async def wechat_save_session():
+    """[WeChat] 保存会话"""
+    success = await wechat_bot.save_session()
+    return {"ok": success}
 
 
 # === 文件管理 API ===

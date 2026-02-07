@@ -15,3 +15,4 @@ playwright-report/
 test-results/
 trace_logs/
 scheduled_tasks.json
+messages.db
