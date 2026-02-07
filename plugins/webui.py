@@ -68,11 +68,20 @@ async def webui_qr() -> dict[str, Any]:
 
 
 @route("GET", "/webui/status", tags=["WebUI"])
-async def webui_status() -> dict[str, Any]:
-    """获取服务器状态"""
+async def webui_status(poll_login: bool = False) -> dict[str, Any]:
+    """
+    获取服务器状态
+
+    Args:
+        poll_login: 是否主动轮询登录状态 (未登录时自动触发)
+    """
     bot = get_bot()
     processor = get_processor()
     config = get_config()
+
+    # 未登录时自动触发登录轮询
+    if poll_login or not bot.is_logged_in:
+        await bot.check_login_status(poll=True)
 
     # 获取登录状态详情
     login_detail = await bot.get_login_status_detail()
@@ -93,6 +102,8 @@ async def webui_status() -> dict[str, Any]:
         "tasks_count": len(processor.tasks),
         "plugins_count": len(processor.plugin_loader.loaded_plugins),
         "entry_host": login_detail.get("entry_host", ""),
+        # 登录状态中文描述
+        "login_status_text": _get_login_status_text(login_detail),
     }
 
 
@@ -116,6 +127,28 @@ def _format_uptime(seconds: int) -> str:
     hours = seconds // 3600
     minutes = (seconds % 3600) // 60
     return f"{hours}小时{minutes}分"
+
+
+def _get_login_status_text(login_detail: dict) -> str:
+    """根据登录状态返回中文描述"""
+    if login_detail.get("logged_in"):
+        return "已登录"
+
+    code = login_detail.get("code", 0)
+    status = login_detail.get("status", "")
+
+    if code == 201:
+        return "已扫码，请在手机上确认"
+    if code == 408:
+        return "等待扫码..."
+    if status == "qr_expired":
+        return "二维码已过期，请刷新"
+    if status == "need_qr":
+        return "请扫描二维码"
+    if status == "qr_ready":
+        return "二维码已就绪"
+
+    return "等待登录"
 
 
 def _generate_html(app_name: str, version: str) -> str:
@@ -507,29 +540,58 @@ def _generate_html(app_name: str, version: str) -> str:
 
         function startQRAutoRefresh() {{
             if (qrRefreshTimer) return;
-            qrRefreshTimer = setInterval(async () => {{
-                const data = await fetchJSON('/webui/status');
-                if (data.logged_in) {{
-                    refreshQR();
-                }} else {{
-                    // Update countdown
+            let pollInterval = 3000;
+
+            async function poll() {{
+                try {{
+                    const data = await fetchJSON('/webui/status');
+                    const badge = document.getElementById('status-badge');
                     const info = document.getElementById('refresh-info');
-                    const match = info.textContent.match(/(\d+)/);
-                    if (match) {{
-                        const remaining = parseInt(match[1]) - 3;
-                        if (remaining <= 0) {{
-                            refreshQR();
-                        }} else {{
+
+                    if (data.logged_in) {{
+                        const placeholder = document.getElementById('qr-placeholder');
+                        const img = document.getElementById('qr-image');
+                        placeholder.innerHTML = '✓ 已登录';
+                        placeholder.style.display = 'flex';
+                        img.style.display = 'none';
+                        badge.className = 'status-badge logged-in';
+                        badge.innerHTML = '<span class="status-dot"></span><span>已登录</span>';
+                        info.textContent = '';
+                        stopQRAutoRefresh();
+                        refreshStatus();
+                        return;
+                    }}
+
+                    const statusText = data.login_status_text || '等待扫码';
+                    badge.innerHTML = '<span class="status-dot pulse"></span><span>' + statusText + '</span>';
+
+                    if (data.login_code === 201) {{
+                        badge.className = 'status-badge waiting';
+                        info.textContent = '请在手机上点击确认';
+                        pollInterval = 1000;
+                    }} else {{
+                        const match = info.textContent.match(/(\d+)/);
+                        if (match) {{
+                            const remaining = parseInt(match[1]) - Math.round(pollInterval/1000);
+                            if (remaining <= 0) {{
+                                refreshQR();
+                                return;
+                            }}
                             info.textContent = `二维码有效期: ${{remaining}}秒`;
                         }}
+                        pollInterval = 3000;
                     }}
+                }} catch (e) {{
+                    console.error('Poll failed:', e);
                 }}
-            }}, 3000);
+                qrRefreshTimer = setTimeout(poll, pollInterval);
+            }}
+            qrRefreshTimer = setTimeout(poll, pollInterval);
         }}
 
         function stopQRAutoRefresh() {{
             if (qrRefreshTimer) {{
-                clearInterval(qrRefreshTimer);
+                clearTimeout(qrRefreshTimer);
                 qrRefreshTimer = null;
             }}
         }}
