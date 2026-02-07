@@ -1,229 +1,733 @@
-from fastapi import FastAPI, HTTPException, Response, UploadFile, File
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+"""
+WeChat FileHelper Protocol Bot - FastAPI 服务入口
+
+功能:
+- Telegram Bot API 兼容接口
+- 插件系统
+- 消息持久化
+- 文件管理
+- 稳定性增强
+"""
+
 from contextlib import asynccontextmanager
-import bot
+import asyncio
+import mimetypes
 import os
+from dataclasses import asdict
+from datetime import datetime
+from pathlib import Path
 import shutil
 import tempfile
-import asyncio
+import time
 
-# Global bot instance
+from fastapi import FastAPI, HTTPException, Query, Response, UploadFile, File
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+import direct_bot
 import processor
 
-# Create downloads directory
-DOWNLOAD_DIR = "/Users/aq/Desktop/myproject/wechat-filehelper-api/downloads"
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Global bot instance
-wechat_bot = bot.WeChatHelperBot()
-command_processor = processor.CommandProcessor(wechat_bot)
-listener_task = None
+# === 配置 ===
+
+DOWNLOAD_DIR = Path(os.getenv("DOWNLOAD_DIR", os.path.join(os.getcwd(), "downloads")))
+DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# 按日期分目录存储
+FILE_DATE_SUBDIR = os.getenv("FILE_DATE_SUBDIR", "1").strip().lower() in {"1", "true", "yes", "on"}
+
+AUTO_DOWNLOAD = os.getenv("AUTO_DOWNLOAD", "1").strip().lower() in {"1", "true", "yes", "on"}
+
+# 文件保留天数 (0=永久)
+FILE_RETENTION_DAYS = int(os.getenv("FILE_RETENTION_DAYS", "0") or "0")
+
+# 稳定性配置
+HEARTBEAT_INTERVAL = int(os.getenv("HEARTBEAT_INTERVAL", "30") or "30")
+RECONNECT_DELAY = int(os.getenv("RECONNECT_DELAY", "5") or "5")
+MAX_RECONNECT_ATTEMPTS = int(os.getenv("MAX_RECONNECT_ATTEMPTS", "10") or "10")
+
+
+# === 全局实例 ===
+
+wechat_bot = direct_bot.WeChatHelperBot(
+    entry_host=os.getenv("WECHAT_ENTRY_HOST", "szfilehelper.weixin.qq.com")
+)
+command_processor = processor.CommandProcessor(wechat_bot, download_dir=str(DOWNLOAD_DIR))
+
+listener_task: asyncio.Task | None = None
+session_saver_task: asyncio.Task | None = None
+heartbeat_task: asyncio.Task | None = None
+cleanup_task: asyncio.Task | None = None
+
+# 稳定性状态
+stability_state = {
+    "reconnect_attempts": 0,
+    "last_heartbeat": 0,
+    "last_message_time": 0,
+    "total_messages": 0,
+    "errors": [],
+}
+
+
+# === 辅助函数 ===
+
+def get_file_save_path(file_name: str) -> Path:
+    """获取文件保存路径 (支持按日期分目录)"""
+    if FILE_DATE_SUBDIR:
+        date_dir = datetime.now().strftime("%Y-%m-%d")
+        target_dir = DOWNLOAD_DIR / date_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        return target_dir / file_name
+    return DOWNLOAD_DIR / file_name
+
+
+def add_error(error: str):
+    """记录错误 (保留最近20条)"""
+    stability_state["errors"].append({
+        "time": datetime.now().isoformat(),
+        "error": error,
+    })
+    if len(stability_state["errors"]) > 20:
+        stability_state["errors"] = stability_state["errors"][-20:]
+
+
+# === 后台任务 ===
 
 async def background_listener():
-    """Polls for new messages and processes them."""
-    # Use a set to track processed message IDs or content to avoid dupes
-    # Since we added 'id' extraction, we can try to use it.
-    processed_ids = set()
-    sent_buffer = []  # Keep track of last ~10 sent messages to avoid loops
-    print("Background listener started.")
-    
+    """消息监听器 - 带自动重连"""
+    processed_order: list[str] = []
+    processed_set: set[str] = set()
+    sent_buffer: list[str] = []
+
+    print("[Listener] Started")
+
     while True:
         try:
-            # If not logged in, try to detect if login happened
             if not wechat_bot.is_logged_in:
-                if await wechat_bot.check_login_status():
-                    print("Login detected by background listener!")
-            
+                await wechat_bot.check_login_status(poll=True)
+                if wechat_bot.is_logged_in:
+                    stability_state["reconnect_attempts"] = 0
+                    print("[Listener] Login restored")
+
             if wechat_bot.is_logged_in:
-                messages = await wechat_bot.get_latest_messages(limit=8)
-                
-                # Process oldest first
+                messages = await wechat_bot.get_latest_messages(limit=12)
+
                 for msg in reversed(messages):
-                    content = msg.get('text', '').strip()
-                    msg_id = msg.get('id')
-                    
-                    # Deduplication
-                    unique_key = msg_id if msg_id else content
-                    if not unique_key or unique_key in processed_ids:
+                    content = str(msg.get("text", "")).strip()
+                    msg_id = str(msg.get("id", "")).strip()
+                    unique_key = msg_id or content
+
+                    if not unique_key:
                         continue
-                        
-                    # Loop prevention: If content matches something we just sent, skip it
-                    if content in sent_buffer:
-                        processed_ids.add(unique_key)
+                    if unique_key in processed_set:
                         continue
 
-                    print(f"New message detected: {content[:30]}...")
-                    processed_ids.add(unique_key)
-                    
-                    # Auto-download for images and files
-                    if msg.get('type') in ['image', 'file']:
-                        file_name = msg.get('file_name') or f"download_{msg_id or unique_key[:8]}"
-                        if msg.get('type') == 'image' and not file_name.endswith('.png'):
-                            file_name += ".png"
-                        
-                        save_path = os.path.join(DOWNLOAD_DIR, file_name)
-                        print(f"Auto-downloading {msg.get('type')}: {file_name}")
-                        success = await wechat_bot.download_message_content(msg_id or unique_key, save_path)
+                    processed_set.add(unique_key)
+                    processed_order.append(unique_key)
+                    if len(processed_order) > 5000:
+                        old = processed_order.pop(0)
+                        processed_set.discard(old)
+
+                    if content and content in sent_buffer:
+                        continue
+
+                    # 自动下载文件
+                    if AUTO_DOWNLOAD and msg.get("type") in {"image", "file"}:
+                        file_name = msg.get("file_name") or f"download_{msg_id[:8] or len(processed_order)}"
+                        if msg.get("type") == "image" and "." not in file_name:
+                            file_name += ".jpg"
+
+                        save_path = get_file_save_path(file_name)
+                        success = await wechat_bot.download_message_content(msg_id or unique_key, str(save_path))
+
                         if success:
-                            reply = f"✅ 已成功接收保存: {file_name}"
-                            await wechat_bot.send_text(reply)
-                            sent_buffer.append(reply)
-                            if len(sent_buffer) > 10: sent_buffer.pop(0)
+                            # 更新消息中的文件路径
+                            msg["file_path"] = str(save_path)
+                            msg["file_size"] = save_path.stat().st_size if save_path.exists() else 0
 
-                    # Standard command processing
+                            # 保存文件元数据
+                            mime_type, _ = mimetypes.guess_type(file_name)
+                            command_processor.message_store.save_file(
+                                msg_id=msg_id,
+                                file_name=file_name,
+                                file_path=str(save_path),
+                                file_size=msg.get("file_size", 0),
+                                mime_type=mime_type,
+                            )
+
+                    # 处理消息
                     reply = await command_processor.process(msg)
                     if reply:
-                        print(f"Replying: {reply}")
-                        await wechat_bot.send_text(reply)
-                        sent_buffer.append(reply)
-                        if len(sent_buffer) > 10: sent_buffer.pop(0)
-            
-        except Exception as e:
-            print(f"Listener error: {e}")
-        
-        await asyncio.sleep(2) # Poll every 2 seconds
+                        ok = await wechat_bot.send_text(reply)
+                        if ok:
+                            sent_buffer.append(reply)
+                            if len(sent_buffer) > 40:
+                                sent_buffer.pop(0)
+
+                    stability_state["last_message_time"] = time.time()
+                    stability_state["total_messages"] += 1
+
+        except Exception as exc:
+            error_msg = f"Listener error: {exc}"
+            print(f"[Listener] {error_msg}")
+            add_error(error_msg)
+
+        await asyncio.sleep(1)
+
 
 async def periodic_session_saver():
-    """Periodically saves session state."""
+    """定期保存会话"""
     while True:
-        await asyncio.sleep(60)  # Save every 60 seconds
+        await asyncio.sleep(60)
         try:
             if wechat_bot.is_logged_in:
                 await wechat_bot.save_session()
-        except Exception as e:
-            print(f"Session save error: {e}")
+        except Exception as exc:
+            print(f"[SessionSaver] Error: {exc}")
+
+
+async def heartbeat_monitor():
+    """心跳监控 - 检测掉线并触发重连"""
+    while True:
+        await asyncio.sleep(HEARTBEAT_INTERVAL)
+        try:
+            stability_state["last_heartbeat"] = time.time()
+
+            if wechat_bot.is_logged_in:
+                # 检查连接状态
+                status = await wechat_bot._synccheck()
+                if status == "loginout":
+                    print("[Heartbeat] Detected logout, will reconnect")
+                    wechat_bot.is_logged_in = False
+                    stability_state["reconnect_attempts"] += 1
+
+                    if stability_state["reconnect_attempts"] <= MAX_RECONNECT_ATTEMPTS:
+                        await asyncio.sleep(RECONNECT_DELAY)
+                        # 尝试使用已保存的会话重新登录
+                        await wechat_bot._load_session()
+                        await wechat_bot.check_login_status(poll=True)
+                    else:
+                        add_error(f"Max reconnect attempts ({MAX_RECONNECT_ATTEMPTS}) reached")
+
+        except Exception as exc:
+            add_error(f"Heartbeat error: {exc}")
+
+
+async def file_cleanup_task():
+    """定期清理过期文件"""
+    if FILE_RETENTION_DAYS <= 0:
+        return
+
+    while True:
+        await asyncio.sleep(3600)  # 每小时检查一次
+        try:
+            deleted_count = command_processor.message_store.cleanup_old_files(
+                days=FILE_RETENTION_DAYS,
+                delete_files=True,
+            )
+            if deleted_count > 0:
+                print(f"[Cleanup] Deleted {deleted_count} old files")
+        except Exception as exc:
+            add_error(f"Cleanup error: {exc}")
+
+
+# === 生命周期 ===
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    # Now that we have a persistent session, we can run headless.
     await wechat_bot.start(headless=True)
-    
-    # Start background tasks
-    global listener_task
+    await command_processor.start()
+
+    global listener_task, session_saver_task, heartbeat_task, cleanup_task
     listener_task = asyncio.create_task(background_listener())
     session_saver_task = asyncio.create_task(periodic_session_saver())
-    
+    heartbeat_task = asyncio.create_task(heartbeat_monitor())
+
+    if FILE_RETENTION_DAYS > 0:
+        cleanup_task = asyncio.create_task(file_cleanup_task())
+
     yield
-    
-    # Shutdown
-    for task in [listener_task, session_saver_task]:
+
+    for task in [listener_task, session_saver_task, heartbeat_task, cleanup_task]:
         if task:
             task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
                 pass
-            
+
+    await command_processor.stop()
     await wechat_bot.stop()
 
-app = FastAPI(lifespan=lifespan, title="WeChat FileHelper API")
 
-# Mount downloads directory to be accessible via /static
-app.mount("/static", StaticFiles(directory=DOWNLOAD_DIR), name="static")
+app = FastAPI(
+    lifespan=lifespan,
+    title="WeChat FileHelper Protocol Bot",
+    description="Telegram Bot API 兼容的微信文件传输助手机器人框架",
+    version="2.0.0",
+)
+app.mount("/static", StaticFiles(directory=str(DOWNLOAD_DIR)), name="static")
+
+
+# === 请求模型 ===
 
 class Message(BaseModel):
     content: str
-    
+
+
+class ChatModePayload(BaseModel):
+    enabled: bool
+
+
+class TaskCreatePayload(BaseModel):
+    time_hm: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    command: str = Field(min_length=1)
+    description: str = ""
+
+
+class TaskEnabledPayload(BaseModel):
+    enabled: bool
+
+
+class ExecutePayload(BaseModel):
+    command: str = Field(min_length=1)
+    send_back: bool = False
+
+
+class SendMessagePayload(BaseModel):
+    """Telegram sendMessage 风格"""
+    text: str = Field(min_length=1)
+    reply_to_message_id: str | None = None
+
+
+class SendDocumentPayload(BaseModel):
+    """Telegram sendDocument 风格"""
+    file_path: str = Field(min_length=1)
+    reply_to_message_id: str | None = None
+
+
+# === 基础 API ===
+
 @app.get("/")
 async def root():
-    """Check service status and login state."""
-    is_logged_in = await wechat_bot.check_login_status()
+    is_logged_in = await wechat_bot.check_login_status(poll=False)
+    login = await wechat_bot.get_login_status_detail()
+    framework_state = command_processor.get_state()
     return {
-        "service": "WeChat FileHelper IPC",
+        "service": "WeChat FileHelper Protocol Bot",
+        "version": "2.0.0",
+        "backend": "direct-protocol",
         "logged_in": is_logged_in,
-        "instructions": "Go to /qr to see the login code. Send POST to /send to send text. POST /upload to send file."
+        "login": login,
+        "framework": framework_state,
+        "stability": {
+            "reconnect_attempts": stability_state["reconnect_attempts"],
+            "last_heartbeat": stability_state["last_heartbeat"],
+            "total_messages": stability_state["total_messages"],
+            "recent_errors": len(stability_state["errors"]),
+        },
     }
+
 
 @app.get("/qr")
 async def get_qr():
-    """Get the login QR code as an image."""
     try:
-        # If already logged in, inform the user
-        if await wechat_bot.check_login_status():
-             return Response(content="Already logged in. You can now use /send.", media_type="text/plain")
-        
+        if await wechat_bot.check_login_status(poll=False):
+            return Response(content="Already logged in. Use /send directly.", media_type="text/plain")
+
         png_bytes = await wechat_bot.get_login_qr()
+        if not png_bytes:
+            return Response(content="Already logged in. Use /send directly.", media_type="text/plain")
+
         return Response(content=png_bytes, media_type="image/png")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/login/status")
+async def login_status(auto_poll: bool = Query(default=True)):
+    if auto_poll:
+        await wechat_bot.check_login_status(poll=True)
+    return await wechat_bot.get_login_status_detail()
+
 
 @app.post("/send")
-async def send_message(msg: Message):
-    """Send a message to yourself (File Transfer Assistant)."""
-    # Double check login status before acting
-    is_logged_in = await wechat_bot.check_login_status()
-    if not is_logged_in:
-        raise HTTPException(
-            status_code=401, 
-            detail="Session not active. Please open the browser window or scan the QR code at /qr"
-        )
-    
+async def send_message_simple(msg: Message):
+    if not await wechat_bot.check_login_status(poll=False):
+        raise HTTPException(status_code=401, detail="Not logged in. Open /qr to login.")
+
     success = await wechat_bot.send_text(msg.content)
-    if success:
-        return {"status": "sent", "content": msg.content}
-    else:
-        raise HTTPException(
-            status_code=500, 
-            detail="Failed to send message. Browser interaction failed."
-        )
+    if not success:
+        raise HTTPException(status_code=500, detail="send_text failed")
+    return {"status": "sent", "content": msg.content}
+
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-    """Upload a file to yourself."""
-    is_logged_in = await wechat_bot.check_login_status()
-    if not is_logged_in:
-        raise HTTPException(status_code=401, detail="Session not active.")
+    if not await wechat_bot.check_login_status(poll=False):
+        raise HTTPException(status_code=401, detail="Not logged in")
 
-    # Save uploaded file to temp
     suffix = os.path.splitext(file.filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
-    
+
     try:
         success = await wechat_bot.send_file(tmp_path)
-        if success:
-            return {"status": "sent", "filename": file.filename}
-        else:
-            raise HTTPException(status_code=500, detail="Failed to send file via browser.")
+        if not success:
+            raise HTTPException(status_code=500, detail="send_file failed")
+        return {"status": "sent", "filename": file.filename}
     finally:
-        # Cleanup temp file
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
+
 @app.get("/messages")
-async def get_messages(limit: int = 10):
-    """Get recent messages from the chat window."""
+async def get_messages(limit: int = Query(default=10, ge=1, le=100)):
     messages = await wechat_bot.get_latest_messages(limit)
     return {"messages": messages}
 
+
 @app.post("/save_session")
 async def trigger_save_session():
-    """Force save session state."""
     success = await wechat_bot.save_session()
-    if success:
-        return {"status": "saved"}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to save session")
+    if not success:
+        raise HTTPException(status_code=500, detail="save_session failed")
+    return {"status": "saved"}
+
+
+# === Telegram Bot API 兼容接口 ===
+
+@app.get("/bot/getUpdates")
+async def bot_get_updates(
+    offset: int = Query(default=0, description="从此 update_id 之后开始获取"),
+    limit: int = Query(default=100, ge=1, le=1000),
+    timeout: int = Query(default=0, description="Long polling 超时 (暂不支持)"),
+):
+    """
+    Telegram getUpdates 风格 API
+
+    获取新消息更新，支持 offset 分页
+    """
+    updates = command_processor.get_updates(offset=offset, limit=limit)
+    return {
+        "ok": True,
+        "result": updates,
+    }
+
+
+@app.post("/bot/sendMessage")
+async def bot_send_message(payload: SendMessagePayload):
+    """
+    Telegram sendMessage 风格 API
+
+    发送文本消息，支持 reply_to_message_id
+    """
+    if not await wechat_bot.check_login_status(poll=False):
+        return {"ok": False, "error_code": 401, "description": "Not logged in"}
+
+    result = await command_processor.send_message(
+        text=payload.text,
+        reply_to_message_id=payload.reply_to_message_id,
+    )
+    return result
+
+
+@app.post("/bot/sendDocument")
+async def bot_send_document(payload: SendDocumentPayload):
+    """
+    Telegram sendDocument 风格 API
+
+    发送文件，支持 reply_to_message_id
+    """
+    if not await wechat_bot.check_login_status(poll=False):
+        return {"ok": False, "error_code": 401, "description": "Not logged in"}
+
+    result = await command_processor.send_document(
+        file_path=payload.file_path,
+        reply_to_message_id=payload.reply_to_message_id,
+    )
+    return result
+
+
+@app.get("/bot/getMe")
+async def bot_get_me():
+    """Telegram getMe 风格 API"""
+    return {
+        "ok": True,
+        "result": {
+            "id": wechat_bot.uin or "unknown",
+            "is_bot": True,
+            "first_name": "FileHelper",
+            "username": "filehelper",
+            "can_read_all_group_messages": False,
+            "supports_inline_queries": False,
+        },
+    }
+
+
+@app.get("/bot/getMessage")
+async def bot_get_message(message_id: str = Query(...)):
+    """按消息ID查询消息"""
+    msg = command_processor.message_store.get_message(message_id)
+    if not msg:
+        return {"ok": False, "error_code": 404, "description": "Message not found"}
+
+    return {
+        "ok": True,
+        "result": {
+            "message_id": msg.msg_id,
+            "date": msg.timestamp,
+            "text": msg.text,
+            "type": msg.type,
+            "reply_to_message_id": msg.reply_to_id,
+        },
+    }
+
+
+# === 文件管理 API ===
 
 @app.get("/downloads")
-async def list_downloads():
-    """List all received files."""
-    files = os.listdir(DOWNLOAD_DIR)
+async def list_downloads(
+    limit: int = Query(default=100, ge=1, le=1000),
+    include_subdirs: bool = Query(default=True),
+):
+    """列出下载的文件"""
+    files = []
+
+    if include_subdirs:
+        for path in DOWNLOAD_DIR.rglob("*"):
+            if path.is_file() and not path.name.startswith("."):
+                rel_path = path.relative_to(DOWNLOAD_DIR)
+                files.append({
+                    "name": path.name,
+                    "path": str(rel_path),
+                    "size": path.stat().st_size,
+                    "modified": path.stat().st_mtime,
+                })
+    else:
+        for path in DOWNLOAD_DIR.iterdir():
+            if path.is_file() and not path.name.startswith("."):
+                files.append({
+                    "name": path.name,
+                    "path": path.name,
+                    "size": path.stat().st_size,
+                    "modified": path.stat().st_mtime,
+                })
+
+    files.sort(key=lambda x: x["modified"], reverse=True)
     return {
-        "files": files,
-        "base_url": "/static/"
+        "files": files[:limit],
+        "total": len(files),
+        "base_url": "/static/",
     }
+
+
+@app.get("/files/metadata")
+async def get_files_metadata(
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+):
+    """获取文件元数据 (从数据库)"""
+    files = command_processor.message_store.get_files(limit=limit, offset=offset)
+    return {
+        "files": [asdict(f) for f in files],
+        "count": len(files),
+    }
+
+
+@app.delete("/files/{msg_id}")
+async def delete_file(msg_id: str):
+    """删除文件"""
+    file_info = command_processor.message_store.get_file_by_msg_id(msg_id)
+    if not file_info:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        path = Path(file_info.file_path)
+        if path.exists():
+            path.unlink()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Delete failed: {exc}")
+
+    return {"status": "deleted", "msg_id": msg_id}
+
+
+@app.post("/files/cleanup")
+async def cleanup_files(days: int = Query(default=30, ge=1)):
+    """清理过期文件"""
+    deleted_messages = command_processor.message_store.cleanup_old_messages(days=days)
+    deleted_files = command_processor.message_store.cleanup_old_files(days=days, delete_files=True)
+    return {
+        "deleted_messages": deleted_messages,
+        "deleted_files": deleted_files,
+    }
+
+
+# === 消息存储 API ===
+
+@app.get("/store/stats")
+async def store_stats():
+    """获取消息存储统计"""
+    return command_processor.message_store.get_stats()
+
+
+@app.get("/store/messages")
+async def store_messages(
+    limit: int = Query(default=50, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    msg_type: str | None = Query(default=None),
+    since: int | None = Query(default=None, description="Unix timestamp"),
+):
+    """查询历史消息"""
+    messages = command_processor.message_store.get_updates(
+        offset=offset,
+        limit=limit,
+        msg_type=msg_type,
+        since=since,
+    )
+    return {
+        "messages": [asdict(m) for m in messages],
+        "count": len(messages),
+    }
+
+
+# === Trace API ===
+
+@app.get("/trace/status")
+async def trace_status():
+    return wechat_bot.get_trace_status()
+
+
+@app.get("/trace/recent")
+async def trace_recent(limit: int = Query(default=100, ge=1, le=1000)):
+    rows = await wechat_bot.read_recent_traces(limit=limit)
+    return {"count": len(rows), "rows": rows}
+
+
+@app.post("/trace/clear")
+async def trace_clear():
+    await wechat_bot.clear_traces()
+    return {"status": "cleared"}
+
+
+# === Framework API ===
+
+@app.get("/framework/state")
+async def framework_state():
+    return command_processor.get_state()
+
+
+@app.post("/framework/chat_mode")
+async def framework_set_chat_mode(payload: ChatModePayload):
+    command_processor.set_chat_mode(payload.enabled)
+    return {"status": "ok", "enabled": payload.enabled}
+
+
+@app.post("/framework/execute")
+async def framework_execute(payload: ExecutePayload):
+    result = await command_processor.execute_command_text(payload.command, source="api_execute")
+    if payload.send_back and result:
+        await wechat_bot.send_text(result)
+    return {"status": "ok", "command": payload.command, "result": result}
+
+
+@app.get("/framework/tasks")
+async def framework_tasks():
+    return {"tasks": command_processor.list_tasks()}
+
+
+@app.post("/framework/tasks")
+async def framework_add_task(payload: TaskCreatePayload):
+    try:
+        task = command_processor.add_task(
+            time_hm=payload.time_hm,
+            command_text=payload.command,
+            description=payload.description,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"status": "ok", "task": task}
+
+
+@app.delete("/framework/tasks/{task_id}")
+async def framework_delete_task(task_id: str):
+    ok = command_processor.delete_task(task_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"status": "deleted", "task_id": task_id}
+
+
+@app.post("/framework/tasks/{task_id}/enabled")
+async def framework_set_task_enabled(task_id: str, payload: TaskEnabledPayload):
+    ok = command_processor.set_task_enabled(task_id, payload.enabled)
+    if not ok:
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"status": "ok", "task_id": task_id, "enabled": payload.enabled}
+
+
+@app.post("/framework/tasks/{task_id}/run")
+async def framework_run_task(task_id: str):
+    ok = await command_processor.run_task_now(task_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"status": "ok", "task_id": task_id, "trigger": "manual"}
+
+
+# === 插件 API ===
+
+@app.get("/plugins")
+async def list_plugins():
+    """列出已加载的插件"""
+    return command_processor.plugin_loader.get_status()
+
+
+@app.post("/plugins/reload")
+async def reload_plugins():
+    """重新加载所有插件"""
+    command_processor.plugin_loader.reload_all()
+    return command_processor.plugin_loader.get_status()
+
+
+# === 稳定性 API ===
+
+@app.get("/health")
+async def health_check():
+    """健康检查端点"""
+    is_logged_in = await wechat_bot.check_login_status(poll=False)
+    return {
+        "status": "healthy" if is_logged_in else "degraded",
+        "logged_in": is_logged_in,
+        "uptime": int(time.time() - command_processor.started_at),
+        "stability": stability_state,
+    }
+
+
+@app.get("/stability")
+async def stability_status():
+    """稳定性状态"""
+    return {
+        "reconnect_attempts": stability_state["reconnect_attempts"],
+        "max_reconnect_attempts": MAX_RECONNECT_ATTEMPTS,
+        "last_heartbeat": stability_state["last_heartbeat"],
+        "last_message_time": stability_state["last_message_time"],
+        "total_messages": stability_state["total_messages"],
+        "recent_errors": stability_state["errors"],
+        "config": {
+            "heartbeat_interval": HEARTBEAT_INTERVAL,
+            "reconnect_delay": RECONNECT_DELAY,
+            "file_retention_days": FILE_RETENTION_DAYS,
+        },
+    }
+
 
 @app.get("/debug_html")
 async def debug_html():
-    """Dump current page HTML for debugging selectors."""
     source = await wechat_bot.get_page_source()
-    return Response(content=source, media_type="text/html")
+    return Response(content=source, media_type="application/json")
+
 
 if __name__ == "__main__":
     import uvicorn
-    # Run on 0.0.0.0 to be accessible
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

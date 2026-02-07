@@ -13,3 +13,5 @@ test_upload.txt
 received_file_debug.html
 playwright-report/
 test-results/
+trace_logs/
+scheduled_tasks.json

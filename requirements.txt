@@ -1,5 +1,4 @@
 fastapi
 uvicorn
-playwright
-pillow
 python-multipart
+httpx

@@ -1,138 +1,331 @@
-# Wx FileHelper API 🚀
+# WeChat FileHelper Protocol Bot v2.0
 
-### 注意，项目后续将会尝试进行直接逆向，playwright是临时过渡方案
+一个**纯协议**（无浏览器自动化）微信文件传输助手机器人框架。
+目标是把你的微信「文件传输助手」变成服务器控制台：可收发文本/文件、执行指令、回传服务器状态、接入聊天助手、定时任务自动执行。
 
-一个基于 Playwright + FastAPI 的微信文件传输助手自动化框架。通过 HTTP API 将您的微信"文件传输助手"变成可编程的消息接口。
+## v2.0 新特性
 
-## ✨ 功能特性
+- **插件化命令系统** - `plugins/` 目录自动加载，开发者只需创建文件即可扩展
+- **消息持久化** - SQLite 存储历史消息，支持消息 ID 查询和分页
+- **Telegram Bot API 兼容** - `getUpdates`、`sendMessage`、`sendDocument` 等接口
+- **回复消息功能** - 支持 `reply_to_message_id` 参数
+- **文件管理增强** - 按日期目录存储、元数据管理、自动清理
+- **稳定性增强** - 心跳监控、自动重连、协议重试
 
-- **双向通信**：通过 API 发送消息，后台自动接收并处理微信消息
-- **会话持久化**：登录状态自动保存，重启无需重新扫码
-- **命令系统**：内置可扩展的命令处理器（支持 `ping`、`screenshot`、`echo` 等）
-- **文件传输**：支持发送文件到自己的微信
+## 设计目标
 
-## 📦 安装依赖
+- 纯协议交互（`mmwebwx-bin`），不依赖 Playwright/Selenium
+- 可扩展插件框架（命令、消息处理器、任务调度）
+- 可观测性（协议抓包 trace、登录状态机、会话持久化）
+- Telegram Bot API 兼容，便于迁移和集成
+- 适配自有服务器交互（HTTP 调用、Webhook 对接）
+
+## 快速开始
 
 ```bash
-# 创建虚拟环境（推荐）
-python -m venv venv
-source venv/bin/activate  # macOS/Linux
-# 或 venv\Scripts\activate  # Windows
-
-# 安装依赖
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-
-# 安装 Playwright 浏览器
-playwright install chromium
+python3 main.py
 ```
 
-## 🚀 快速开始
+服务默认监听：`http://127.0.0.1:8000`
 
-### 1. 启动服务
+## 登录流程
 
-```bash
-python main.py
-```
+1. 访问 `GET /qr` 获取二维码
+2. 手机微信扫码确认
+3. 轮询 `GET /login/status`
+   - `408`: 等待扫码
+   - `201`: 已扫码待确认
+   - `200`: 登录成功
 
-服务将在 `http://localhost:8000` 启动
+## API 概览
 
-### 2. 登录微信
+### 基础 API
 
-- 访问http://localhost:8000/qr
-- 使用手机微信扫描二维码
-- 在手机上点击"确认"
-
-### 3. 使用 API
-
-登录成功后，您可以通过以下接口与微信交互：
-
-#### 检查状态
-```bash
-curl http://localhost:8000/
-```
-
-#### 发送文本消息
-```bash
-curl -X POST http://localhost:8000/send \
-  -H "Content-Type: application/json" \
-  -d '{"content": "Hello from API!"}'
-```
-
-#### 上传文件
-```bash
-curl -X POST http://localhost:8000/upload \
-  -F "file=@/path/to/your/file.pdf"
-```
-
-#### 获取最近消息
-```bash
-curl http://localhost:8000/messages?limit=10
-```
-
-#### 保存会话状态
-```bash
-curl -X POST http://localhost:8000/save_session
-```
-
-## 📡 API 接口
-
-| 方法 | 路径 | 描述 |
+| 端点 | 方法 | 说明 |
 |------|------|------|
-| `GET` | `/` | 检查服务状态和登录状态 |
-| `GET` | `/qr` | 获取登录二维码（PNG 图片） |
-| `POST` | `/send` | 发送文本消息 |
-| `POST` | `/upload` | 上传并发送文件 |
-| `GET` | `/messages` | 获取最近的消息列表 |
-| `POST` | `/save_session` | 手动保存会话状态 |
-| `GET` | `/debug_html` | 获取当前页面 HTML（调试用） |
+| `/` | GET | 服务状态总览 |
+| `/qr` | GET | 登录二维码 |
+| `/login/status` | GET | 登录状态 |
+| `/send` | POST | 发送文本 |
+| `/upload` | POST | 发送文件 |
+| `/messages` | GET | 最近消息 |
+| `/health` | GET | 健康检查 |
 
-## 🤖 内置命令
+### Telegram Bot API 兼容
 
-通过微信"文件传输助手"向自己发送以下命令，服务器会自动响应：
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/bot/getUpdates` | GET | 获取消息更新 (支持 offset 分页) |
+| `/bot/sendMessage` | POST | 发送消息 (支持 reply_to_message_id) |
+| `/bot/sendDocument` | POST | 发送文件 |
+| `/bot/getMe` | GET | 获取机器人信息 |
+| `/bot/getMessage` | GET | 按 ID 查询消息 |
 
-| 命令 | 描述 | 示例响应 |
-|------|------|----------|
-| `ping` | 测试连通性 | `pong` |
-| `help` | 显示帮助菜单 | `Available commands: ping, help, echo, screenshot` |
-| `echo [内容]` | 回显内容 | 返回 `[内容]` 部分 |
-| `screenshot` | 获取服务器浏览器截图 | 发送截图图片 |
+**示例：获取新消息**
 
-## 🔧 扩展命令
+```bash
+# 首次获取
+curl "http://127.0.0.1:8000/bot/getUpdates?limit=10"
 
-编辑 `processor.py` 来添加自定义命令：
+# 获取 offset 之后的消息 (用于分页)
+curl "http://127.0.0.1:8000/bot/getUpdates?offset=100&limit=10"
+```
+
+**示例：发送消息并回复**
+
+```bash
+curl -X POST http://127.0.0.1:8000/bot/sendMessage \
+  -H "Content-Type: application/json" \
+  -d '{"text":"回复内容","reply_to_message_id":"1234567890"}'
+```
+
+### 消息存储 API
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/store/stats` | GET | 存储统计 |
+| `/store/messages` | GET | 查询历史消息 |
+
+### 文件管理 API
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/downloads` | GET | 文件列表 (支持子目录) |
+| `/files/metadata` | GET | 文件元数据 |
+| `/files/{msg_id}` | DELETE | 删除文件 |
+| `/files/cleanup` | POST | 清理过期文件 |
+
+### 插件 API
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/plugins` | GET | 列出已加载插件 |
+| `/plugins/reload` | POST | 重新加载插件 |
+
+### Framework API
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/framework/state` | GET | 框架状态 |
+| `/framework/execute` | POST | 执行命令 |
+| `/framework/tasks` | GET/POST | 定时任务管理 |
+| `/framework/chat_mode` | POST | 聊天模式开关 |
+
+### 稳定性 API
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/health` | GET | 健康检查 |
+| `/stability` | GET | 稳定性状态 (重连次数、心跳等) |
+
+## 插件开发
+
+### 创建命令
+
+在 `plugins/` 目录创建 `.py` 文件：
 
 ```python
-# 在 CommandProcessor 类中添加
-async def cmd_mycommand(self, args, full_text):
-    """处理 mycommand 指令"""
-    return f"你发送了: {' '.join(args)}"
+# plugins/my_plugin.py
+from plugin_base import command, CommandContext
 
-# 在 __init__ 中注册
-self.commands["mycommand"] = self.cmd_mycommand
+@command("hello", description="打招呼", aliases=["hi"])
+async def cmd_hello(ctx: CommandContext) -> str:
+    name = ctx.args[0] if ctx.args else "世界"
+    return f"你好, {name}!"
 ```
 
-## 📁 项目结构
+重启服务或调用 `POST /plugins/reload` 即可生效。
+
+### 命令装饰器参数
+
+```python
+@command(
+    name="mycmd",           # 命令名
+    description="说明",     # /help 中显示
+    usage="/mycmd <arg>",   # 使用说明
+    aliases=["mc", "m"],    # 别名
+    hidden=False,           # 是否隐藏
+)
+```
+
+### CommandContext 属性
+
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `text` | str | 原始消息文本 |
+| `command` | str | 命令名 |
+| `args` | list[str] | 参数列表 |
+| `msg` | dict | 原始消息对象 |
+| `msg_id` | str | 消息 ID |
+| `is_command` | bool | 是否为 `/` 开头的命令 |
+| `bot` | WeChatHelperBot | 机器人实例 |
+| `processor` | CommandProcessor | 处理器实例 |
+| `reply_to` | str \| None | 回复的消息 ID |
+
+### 消息处理器
+
+```python
+from plugin_base import on_message, CommandContext
+
+@on_message(priority=100, name="my_filter")
+async def my_handler(ctx: CommandContext) -> str | None:
+    # 返回字符串: 回复该内容并停止后续处理
+    # 返回 None: 继续后续处理
+    if "关键词" in ctx.text:
+        return "检测到关键词"
+    return None
+```
+
+## 微信侧命令
+
+发送给文件传输助手：
+
+| 命令 | 说明 |
+|------|------|
+| `/help` | 显示帮助 |
+| `/status` | 服务器状态 |
+| `/plugins` | 插件状态 |
+| `/chat on\|off` | 聊天模式 |
+| `/ask 问题` | 聊天问答 |
+| `/httpget URL` | HTTP 请求 |
+| `/sendfile 文件名` | 发送文件 |
+| `/task list\|add\|del\|run` | 定时任务 |
+| `/time` | 当前时间 |
+| `/calc 表达式` | 计算器 |
+| `/uuid` | 生成 UUID |
+| `/ip` | 服务器 IP |
+
+## 环境变量
+
+### 基础配置
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `WECHAT_ENTRY_HOST` | `szfilehelper.weixin.qq.com` | 入口域名 |
+| `DOWNLOAD_DIR` | `./downloads` | 下载目录 |
+| `AUTO_DOWNLOAD` | `1` | 自动下载文件 |
+| `FILE_DATE_SUBDIR` | `1` | 按日期分子目录 |
+| `FILE_RETENTION_DAYS` | `0` | 文件保留天数 (0=永久) |
+
+### 插件与存储
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `PLUGINS_DIR` | `./plugins` | 插件目录 |
+| `MESSAGE_DB_PATH` | `./messages.db` | 消息数据库路径 |
+| `ROBOT_TASK_FILE` | `./scheduled_tasks.json` | 任务持久化文件 |
+
+### 聊天助手
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `CHATBOT_ENABLED` | `0` | 启用聊天模式 |
+| `CHATBOT_WEBHOOK_URL` | - | 聊天 Webhook |
+| `CHATBOT_TIMEOUT` | `20` | 超时秒数 |
+
+### Webhook 推送
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `MESSAGE_WEBHOOK_URL` | - | 消息推送 Webhook |
+| `MESSAGE_WEBHOOK_TIMEOUT` | `10` | 推送超时 |
+| `LOGIN_CALLBACK_URL` | - | 登录成功回调 |
+
+### 稳定性配置
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `HEARTBEAT_INTERVAL` | `30` | 心跳间隔秒数 |
+| `RECONNECT_DELAY` | `5` | 重连延迟秒数 |
+| `MAX_RECONNECT_ATTEMPTS` | `10` | 最大重连次数 |
+
+### 安全控制
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `ROBOT_HTTP_ALLOWLIST` | - | HTTP 请求白名单 (逗号分隔) |
+
+### Trace 抓包
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `WECHAT_TRACE_ENABLED` | `1` | 启用协议抓包 |
+| `WECHAT_TRACE_REDACT` | `1` | 脱敏敏感字段 |
+| `WECHAT_TRACE_MAX_BODY` | `4096` | 最大 body 长度 |
+| `WECHAT_TRACE_DIR` | `./trace_logs` | 日志目录 |
+
+## 项目结构
 
 ```
-wechat-filehelper-api/
-├── main.py          # FastAPI 服务端入口
-├── bot.py           # Playwright 浏览器自动化核心
-├── processor.py     # 命令处理逻辑
-├── requirements.txt # Python 依赖
-├── state.json       # 会话状态文件（自动生成，已添加到 .gitignore）
-└── .gitignore       # Git 忽略规则
+.
+├── main.py              # FastAPI 服务入口
+├── direct_bot.py        # 微信协议客户端
+├── processor.py         # 命令处理器
+├── plugin_base.py       # 插件基类和装饰器
+├── plugin_loader.py     # 插件加载器
+├── message_store.py     # 消息持久化 (SQLite)
+├── plugins/             # 插件目录
+│   ├── builtin.py       # 内置命令
+│   └── example.py       # 示例插件
+├── downloads/           # 下载文件目录
+│   └── 2024-01-15/      # 按日期分目录
+├── messages.db          # 消息数据库
+├── state.json           # 会话状态
+├── scheduled_tasks.json # 定时任务
+└── trace_logs/          # 协议日志
 ```
 
-## ⚠️ 注意事项
+## Webhook 集成示例
 
-1. **首次登录**：首次使用需要扫码登录，之后会话会被保存（待验证）
-2. **网络环境**：确保服务器能访问 `filehelper.weixin.qq.com`
-3. **安全性**：此 API 无认证保护，生产环境请添加鉴权机制
+### 消息推送
 
-## 📝 许可证
+设置 `MESSAGE_WEBHOOK_URL` 后，每条消息会推送到你的服务：
 
-MIT License
+```json
+{
+  "update_id": 123,
+  "message": {
+    "message_id": "1234567890",
+    "date": 1705312345,
+    "text": "消息内容",
+    "type": "text",
+    "document": null
+  }
+}
+```
 
----
+### 聊天回复
 
-Made with ❤️ by API automation
+设置 `CHATBOT_WEBHOOK_URL` 后，聊天消息会发送到你的服务，期望返回：
+
+```json
+{
+  "reply": "回复内容"
+}
+```
+
+## 与 Telegram Bot API 对比
+
+| Telegram | 本框架 | 说明 |
+|----------|--------|------|
+| `getUpdates` | `/bot/getUpdates` | 完全兼容 offset/limit |
+| `sendMessage` | `/bot/sendMessage` | 支持 reply_to_message_id |
+| `sendDocument` | `/bot/sendDocument` | 支持 reply_to_message_id |
+| `getMe` | `/bot/getMe` | 返回机器人信息 |
+| Webhook | `MESSAGE_WEBHOOK_URL` | 推送模式 |
+
+## 迁移指南 (从 Telegram Bot)
+
+如果你有现成的 Telegram Bot 代码，可以通过以下步骤迁移：
+
+1. 将 API 地址从 `https://api.telegram.org/bot<token>/` 改为 `http://your-server:8000/bot/`
+2. `sendMessage` 和 `sendDocument` 参数基本兼容
+3. `getUpdates` 的 offset 机制相同
+4. 文件上传改用 `/upload` 端点
+
+## License
+
+MIT
