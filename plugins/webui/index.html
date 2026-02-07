@@ -278,6 +278,7 @@
             display: flex;
             align-items: center;
             gap: 12px;
+            flex-wrap: wrap;
         }
 
         .file-upload input[type="file"] {
@@ -300,13 +301,38 @@
             background: rgba(255,255,255,0.15);
         }
 
-        .file-name {
+        .file-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            flex: 1;
+        }
+
+        .file-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: rgba(74, 158, 255, 0.15);
+            border-radius: 6px;
+            font-size: 0.8rem;
+            color: var(--accent);
+        }
+
+        .file-tag .remove {
+            cursor: pointer;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+        }
+
+        .file-tag .remove:hover {
+            opacity: 1;
+        }
+
+        .input-hint {
+            font-size: 0.75rem;
             color: var(--text-muted);
-            font-size: 0.875rem;
-            max-width: 200px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            margin-top: 4px;
         }
 
         /* Toast */
@@ -385,16 +411,17 @@
             <div class="card-title">发送消息</div>
             <div class="message-section">
                 <div class="input-group">
-                    <textarea id="message-input" placeholder="输入消息内容..." rows="3"></textarea>
+                    <textarea id="message-input" placeholder="输入消息内容 (Enter 发送, Shift+Enter 换行)" rows="3"></textarea>
                 </div>
+                <div class="input-hint">Enter 发送 | Shift+Enter 换行</div>
                 <div class="file-upload">
-                    <input type="file" id="file-input" onchange="updateFileName()">
-                    <label for="file-input">选择文件</label>
-                    <span class="file-name" id="file-name">未选择文件</span>
+                    <input type="file" id="file-input" multiple onchange="updateFileList()">
+                    <label for="file-input">选择文件 (可多选)</label>
+                    <div class="file-list" id="file-list"></div>
                 </div>
                 <div class="actions" style="justify-content: flex-start;">
                     <button class="btn btn-success" id="send-btn" onclick="sendMessage()">发送消息</button>
-                    <button class="btn btn-primary" id="upload-btn" onclick="uploadFile()" disabled>发送文件</button>
+                    <button class="btn btn-primary" id="upload-btn" onclick="uploadFiles()" disabled>发送文件</button>
                 </div>
             </div>
         </div>
@@ -447,18 +474,31 @@
             return resp.json();
         }
 
-        function updateFileName() {
+        function updateFileList() {
             const input = document.getElementById('file-input');
-            const nameSpan = document.getElementById('file-name');
+            const listDiv = document.getElementById('file-list');
             const uploadBtn = document.getElementById('upload-btn');
 
+            listDiv.innerHTML = '';
+
             if (input.files.length > 0) {
-                nameSpan.textContent = input.files[0].name;
+                for (let i = 0; i < input.files.length; i++) {
+                    const file = input.files[i];
+                    const tag = document.createElement('span');
+                    tag.className = 'file-tag';
+                    tag.innerHTML = `${file.name} <span class="remove" onclick="clearFiles()">×</span>`;
+                    listDiv.appendChild(tag);
+                }
                 uploadBtn.disabled = false;
             } else {
-                nameSpan.textContent = '未选择文件';
                 uploadBtn.disabled = true;
             }
+        }
+
+        function clearFiles() {
+            const input = document.getElementById('file-input');
+            input.value = '';
+            updateFileList();
         }
 
         async function sendMessage() {
@@ -496,7 +536,7 @@
             }
         }
 
-        async function uploadFile() {
+        async function uploadFiles() {
             const input = document.getElementById('file-input');
 
             if (!input.files.length) {
@@ -506,31 +546,44 @@
 
             const btn = document.getElementById('upload-btn');
             btn.disabled = true;
-            btn.textContent = '上传中...';
+            const totalFiles = input.files.length;
+            let successCount = 0;
+            let failCount = 0;
 
-            try {
-                const formData = new FormData();
-                formData.append('document', input.files[0]);
+            for (let i = 0; i < totalFiles; i++) {
+                const file = input.files[i];
+                btn.textContent = `上传中 (${i + 1}/${totalFiles})...`;
 
-                const resp = await fetch('/bot/sendDocument/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-                const data = await resp.json();
+                try {
+                    const formData = new FormData();
+                    formData.append('document', file);
 
-                if (data.ok) {
-                    showToast('文件发送成功');
-                    input.value = '';
-                    updateFileName();
-                } else {
-                    showToast('发送失败: ' + (data.error || '未知错误'), 'error');
+                    const resp = await fetch('/bot/sendDocument/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await resp.json();
+
+                    if (data.ok) {
+                        successCount++;
+                    } else {
+                        failCount++;
+                    }
+                } catch (e) {
+                    failCount++;
                 }
-            } catch (e) {
-                showToast('网络错误: ' + e.message, 'error');
-            } finally {
-                btn.disabled = false;
-                btn.textContent = '发送文件';
             }
+
+            if (failCount === 0) {
+                showToast(`${successCount} 个文件发送成功`);
+            } else {
+                showToast(`成功 ${successCount} 个, 失败 ${failCount} 个`, failCount > 0 ? 'error' : 'success');
+            }
+
+            input.value = '';
+            updateFileList();
+            btn.disabled = false;
+            btn.textContent = '发送文件';
         }
 
         async function refreshQR() {
