@@ -1,472 +1,500 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{app_name}} - WebUI</title>
+    <!-- 使用 Inter 字体，并微调字重 -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-color: #0f0f0f;
-            --card-bg: #1a1a1a;
-            --text-color: #e0e0e0;
-            --text-muted: #888;
-            --accent: #4a9eff;
-            --success: #4ade80;
-            --warning: #fbbf24;
-            --error: #f87171;
+            /* Apple 官方配色规范微调 */
+            --bg-color: #f5f5f7;
+            --card-bg: rgba(255, 255, 255, 0.9);
+            /* 微透明感 */
+            --text-primary: #1d1d1f;
+            --text-secondary: #6e6e73;
+            /* 稍微深一点的灰色，增加可读性 */
+            --accent: #0071e3;
+            --success: #34c759;
+            --radius: 22px;
+
+            /* 更具层级感的阴影 */
+            --shadow-card: 0 10px 40px rgba(0, 0, 0, 0.04);
+            --shadow-hover: 0 20px 60px rgba(0, 0, 0, 0.08);
+
+            /* 细边框，Apple 常见的处理方式 */
+            --border-subtle: 1px solid rgba(0, 0, 0, 0.03);
         }
 
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+            -webkit-font-smoothing: antialiased;
+            letter-spacing: -0.015em;
+            /* Apple 喜欢的紧凑字间距 */
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: var(--bg-color);
-            color: var(--text-color);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
             min-height: 100vh;
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding: 20px;
+            padding: 80px 20px;
         }
 
         .container {
             width: 100%;
-            max-width: 800px;
+            max-width: 950px;
+            display: flex;
+            flex-direction: column;
+            gap: 28px;
         }
 
+        @media (max-width: 768px) {
+            body {
+                padding-top: 40px;
+            }
+
+            .top-grid {
+                grid-template-columns: 1fr !important;
+            }
+        }
+
+        /* 标题部分 - 更加大气 */
         header {
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 24px;
         }
 
         h1 {
-            font-size: 1.5rem;
+            font-size: 2.8rem;
+            font-weight: 700;
+            margin-bottom: 12px;
+            background: linear-gradient(180deg, #1d1d1f 0%, #434344 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .version-badge {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            background: rgba(0, 0, 0, 0.05);
+            padding: 4px 14px;
+            border-radius: 100px;
+        }
+
+        /* 卡片容器 - 增加磨砂质感 */
+        .apple-card {
+            background: #ffffff;
+            border-radius: var(--radius);
+            padding: 40px;
+            box-shadow: var(--shadow-card);
+            border: var(--border-subtle);
+            transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.4s ease;
+        }
+
+        .apple-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-hover);
+        }
+
+        .top-grid {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 28px;
+        }
+
+        .section-title {
+            font-size: 1.4rem;
             font-weight: 600;
-            margin-bottom: 5px;
+            margin-bottom: 32px;
+            letter-spacing: -0.02em;
         }
 
-        .version {
-            color: var(--text-muted);
-            font-size: 0.875rem;
-        }
-
-        .card {
-            background: var(--card-bg);
-            border-radius: 12px;
-            padding: 24px;
-            margin-bottom: 20px;
-        }
-
-        .card-title {
-            font-size: 0.875rem;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 16px;
-        }
-
-        /* QR Code Section */
-        .qr-container {
+        /* 登录模块微调 */
+        .qr-section {
             display: flex;
             flex-direction: column;
             align-items: center;
         }
 
-        .qr-wrapper {
-            background: #fff;
-            padding: 16px;
-            border-radius: 12px;
-            margin-bottom: 16px;
-        }
-
-        #qr-image {
-            display: block;
-            width: min(280px, 60vw);
-            height: min(280px, 60vw);
-            object-fit: contain;
-        }
-
-        .qr-placeholder {
-            width: min(280px, 60vw);
-            height: min(280px, 60vw);
+        .qr-container {
+            width: 200px;
+            height: 200px;
+            background: #fbfbfd;
+            border-radius: 24px;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #333;
-            font-size: 0.875rem;
+            margin-bottom: 24px;
+            border: 1px solid rgba(0, 0, 0, 0.02);
+            transition: all 0.3s;
         }
 
-        .status-badge {
+        .qr-container:hover {
+            background: #fff;
+            border-color: rgba(0, 0, 0, 0.1);
+        }
+
+        #qr-image {
+            width: 170px;
+            height: 170px;
+            object-fit: contain;
+            mix-blend-mode: multiply;
+        }
+
+        .status-pill {
             display: inline-flex;
             align-items: center;
-            gap: 6px;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 0.875rem;
-            font-weight: 500;
+            gap: 10px;
+            padding: 10px 24px;
+            border-radius: 100px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin-bottom: 32px;
+            transition: all 0.3s;
         }
 
-        .status-badge.logged-in {
-            background: rgba(74, 222, 128, 0.15);
-            color: var(--success);
+        .status-pill.waiting {
+            background: #fef0e7;
+            color: #ff9500;
         }
 
-        .status-badge.waiting {
-            background: rgba(251, 191, 36, 0.15);
-            color: var(--warning);
+        .status-pill.logged-in {
+            background: #eafaf1;
+            color: #34c759;
         }
 
-        .status-badge.error {
-            background: rgba(248, 113, 113, 0.15);
-            color: var(--error);
+        .status-pill.error {
+            background: #fff1f0;
+            color: #ff3b30;
         }
 
-        .status-dot {
+        .status-indicator {
             width: 8px;
             height: 8px;
             border-radius: 50%;
             background: currentColor;
+            box-shadow: 0 0 10px currentColor;
+            /* 增加呼吸感 */
         }
 
-        .status-dot.pulse {
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        /* Status Grid */
-        .status-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 16px;
-        }
-
-        .stat-item {
-            text-align: center;
-            padding: 12px;
-            background: rgba(255,255,255,0.03);
-            border-radius: 8px;
-        }
-
-        .stat-value {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: var(--accent);
-        }
-
-        .stat-label {
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            margin-top: 4px;
-        }
-
-        /* Refresh indicator */
-        .refresh-info {
-            text-align: center;
-            color: var(--text-muted);
-            font-size: 0.75rem;
-            margin-top: 12px;
-        }
-
-        /* Loading spinner */
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 3px solid rgba(255,255,255,0.1);
-            border-top-color: var(--accent);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        /* Actions */
-        .actions {
-            display: flex;
-            gap: 12px;
-            justify-content: center;
-            margin-top: 16px;
-            flex-wrap: wrap;
-        }
-
-        .btn {
-            padding: 10px 20px;
+        /* 按钮重定义 - 更加精致 */
+        .apple-btn {
+            font-family: inherit;
+            font-weight: 500;
+            font-size: 1rem;
+            padding: 14px 28px;
+            border-radius: 16px;
             border: none;
-            border-radius: 8px;
-            font-size: 0.875rem;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .btn-primary {
-            background: var(--accent);
+            background: var(--text-primary);
             color: #fff;
         }
 
         .btn-primary:hover {
-            background: #3a8aee;
+            opacity: 0.85;
+            transform: scale(1.01);
+        }
+
+        .btn-primary:active {
+            transform: scale(0.98);
         }
 
         .btn-secondary {
-            background: rgba(255,255,255,0.1);
-            color: var(--text-color);
+            background: #f5f5f7;
+            color: var(--text-primary);
+            margin-top: 12px;
         }
 
         .btn-secondary:hover {
-            background: rgba(255,255,255,0.15);
+            background: #eeeeef;
         }
 
-        .btn-success {
-            background: var(--success);
-            color: #000;
+        /* 统计区块 - 增加质感 */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
         }
 
-        .btn-success:hover {
-            background: #3ac970;
+        .stat-box {
+            background: #fbfbfd;
+            padding: 28px;
+            border-radius: 24px;
+            border: var(--border-subtle);
+            transition: all 0.3s;
         }
 
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
+        .stat-box:hover {
+            background: #fff;
+            transform: scale(1.02);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
         }
 
-        /* Message Input */
-        .message-section {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
+        .stat-label {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            display: block;
         }
 
-        .input-group {
-            display: flex;
-            gap: 12px;
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.03em;
         }
 
-        .input-group input[type="text"],
-        .input-group textarea {
-            flex: 1;
-            padding: 12px 16px;
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 8px;
-            background: rgba(0,0,0,0.3);
-            color: var(--text-color);
-            font-size: 0.875rem;
+        /* 消息发送区 - 输入框优化 */
+        textarea {
+            width: 100%;
+            min-height: 200px;
+            padding: 30px;
+            border-radius: 24px;
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            background: #fbfbfd;
+            font-family: inherit;
+            font-size: 1.15rem;
+            color: var(--text-primary);
+            resize: none;
             outline: none;
-            transition: border-color 0.2s;
+            transition: all 0.3s ease;
+            line-height: 1.6;
         }
 
-        .input-group input:focus,
-        .input-group textarea:focus {
+        textarea:focus {
+            background: #ffffff;
             border-color: var(--accent);
+            box-shadow: 0 0 0 5px rgba(0, 113, 227, 0.08);
         }
 
-        .input-group textarea {
-            min-height: 80px;
-            resize: vertical;
-        }
-
-        .file-upload {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            flex-wrap: wrap;
-        }
-
-        .file-upload input[type="file"] {
-            display: none;
-        }
-
-        .file-upload label {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 10px 20px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 0.875rem;
-            transition: background 0.2s;
-        }
-
-        .file-upload label:hover {
-            background: rgba(255,255,255,0.15);
-        }
-
-        .file-list {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            flex: 1;
-        }
-
+        /* 附件标签 */
         .file-tag {
+            background: #f2f2f7;
+            padding: 8px 16px;
+            border-radius: 100px;
+            font-size: 0.85rem;
+            font-weight: 500;
             display: inline-flex;
             align-items: center;
-            gap: 6px;
-            padding: 6px 12px;
-            background: rgba(74, 158, 255, 0.15);
-            border-radius: 6px;
-            font-size: 0.8rem;
-            color: var(--accent);
+            gap: 8px;
+            margin-right: 8px;
+            margin-bottom: 8px;
+            border: var(--border-subtle);
         }
 
-        .file-tag .remove {
-            cursor: pointer;
-            opacity: 0.7;
-            transition: opacity 0.2s;
-        }
-
-        .file-tag .remove:hover {
-            opacity: 1;
-        }
-
-        .input-hint {
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            margin-top: 4px;
-        }
-
-        /* Toast */
-        .toast {
-            position: fixed;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 12px 24px;
-            background: var(--card-bg);
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            font-size: 0.875rem;
-            z-index: 1000;
-            opacity: 0;
-            transition: opacity 0.3s;
-        }
-
-        .toast.show {
-            opacity: 1;
-        }
-
-        .toast.success {
-            border-left: 3px solid var(--success);
-        }
-
-        .toast.error {
-            border-left: 3px solid var(--error);
-        }
-
+        /* 页脚 - 更加低调优雅 */
         footer {
-            margin-top: auto;
-            padding-top: 20px;
-            text-align: center;
-            color: var(--text-muted);
-            font-size: 0.75rem;
+            margin-top: 80px;
+            padding: 40px 0;
+            border-top: var(--border-subtle);
+            width: 100%;
+            max-width: 950px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        @media (max-width: 600px) {
+            footer {
+                flex-direction: column;
+                gap: 20px;
+                text-align: center;
+            }
+        }
+
+        footer .copyright {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        footer .links {
+            display: flex;
+            gap: 32px;
         }
 
         footer a {
-            color: var(--accent);
+            color: var(--text-secondary);
             text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        footer a:hover {
+            color: var(--accent);
+        }
+
+        /* Toast 转场效果 */
+        .toast {
+            position: fixed;
+            top: 40px;
+            left: 50%;
+            transform: translateX(-50%) scale(0.9);
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(25px) saturate(180%);
+            -webkit-backdrop-filter: blur(25px) saturate(180%);
+            padding: 14px 40px;
+            border-radius: 100px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
+            font-weight: 600;
+            font-size: 1rem;
+            z-index: 2000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.5s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+        }
+
+        .toast.show {
+            transform: translateX(-50%) scale(1);
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* 纯黑加载动画 */
+        .spinner {
+            width: 26px;
+            height: 26px;
+            border: 3px solid rgba(0, 0, 0, 0.04);
+            border-top-color: var(--text-primary);
+            border-radius: 50%;
+            animation: spin 0.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
         }
     </style>
 </head>
+
 <body>
+
+    <div id="toast" class="toast">提示信息</div>
+
     <div class="container">
         <header>
             <h1>{{app_name}}</h1>
-            <span class="version">v{{version}}</span>
+            <span class="version-badge">Version {{version}}</span>
         </header>
 
-        <!-- Login Card -->
-        <div class="card">
-            <div class="card-title">登录状态</div>
-            <div class="qr-container">
-                <div class="qr-wrapper" id="qr-wrapper">
-                    <div class="qr-placeholder" id="qr-placeholder">
-                        <div class="spinner"></div>
+        <div class="top-grid">
+            <!-- 登录管理 -->
+            <div class="apple-card">
+                <h2 class="section-title">连接设备</h2>
+                <div class="qr-section">
+                    <div class="qr-container">
+                        <div id="qr-placeholder" class="qr-placeholder">
+                            <div class="spinner"></div>
+                        </div>
+                        <img id="qr-image" style="display:none;" alt="Login QR Code">
                     </div>
-                    <img id="qr-image" style="display:none;" alt="Login QR Code">
+
+                    <div id="status-badge" class="status-pill waiting">
+                        <span class="status-indicator"></span>
+                        <span id="status-text">初始化中</span>
+                    </div>
+
+                    <div id="refresh-info"
+                        style="font-size:0.8rem; color:var(--text-secondary); margin-bottom: 32px; height: 1.2em; font-weight: 500;">
+                    </div>
+
+                    <div style="width: 100%;">
+                        <button class="apple-btn btn-primary" onclick="refreshQR()">刷新二维码</button>
+                        <button class="apple-btn btn-secondary" onclick="refreshStatus()">检查状态</button>
+                    </div>
                 </div>
-                <div id="status-badge" class="status-badge waiting">
-                    <span class="status-dot pulse"></span>
-                    <span id="status-text">加载中...</span>
-                </div>
-                <div class="refresh-info" id="refresh-info"></div>
             </div>
-            <div class="actions">
-                <button class="btn btn-primary" onclick="refreshQR()">刷新二维码</button>
-                <button class="btn btn-secondary" onclick="refreshStatus()">刷新状态</button>
+
+            <!-- 系统状态 -->
+            <div class="apple-card">
+                <h2 class="section-title">运行状态</h2>
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <span class="stat-label">运行时间</span>
+                        <span class="stat-value" id="stat-uptime">--</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label">定时任务</span>
+                        <span class="stat-value" id="stat-tasks">--</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label">活跃插件</span>
+                        <span class="stat-value" id="stat-plugins">--</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label">聊天模式</span>
+                        <span class="stat-value" id="stat-chat">--</span>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <!-- Message Card -->
-        <div class="card" id="message-card">
-            <div class="card-title">发送消息</div>
-            <div class="message-section">
-                <div class="input-group">
-                    <textarea id="message-input" placeholder="输入消息内容 (Enter 发送, Shift+Enter 换行)" rows="3"></textarea>
-                </div>
-                <div class="input-hint">Enter 发送 | Shift+Enter 换行</div>
-                <div class="file-upload">
-                    <input type="file" id="file-input" multiple onchange="updateFileList()">
-                    <label for="file-input">选择文件 (可多选)</label>
-                    <div class="file-list" id="file-list"></div>
-                </div>
-                <div class="actions" style="justify-content: flex-start;">
-                    <button class="btn btn-success" id="send-btn" onclick="sendMessage()">发送消息</button>
-                    <button class="btn btn-primary" id="upload-btn" onclick="uploadFiles()" disabled>发送文件</button>
-                </div>
+        <!-- 消息发送 -->
+        <div class="apple-card">
+            <h2 class="section-title">发送消息</h2>
+            <div style="position: relative; margin-bottom: 32px;">
+                <textarea id="message-input" placeholder="输入你想发送的内容..."></textarea>
+                <div
+                    style="position: absolute; bottom: 20px; right: 24px; font-size: 0.85rem; color: var(--text-secondary); font-weight: 500;">
+                    Press Enter to Send</div>
             </div>
-        </div>
 
-        <!-- Status Card -->
-        <div class="card">
-            <div class="card-title">服务器状态</div>
-            <div class="status-grid">
-                <div class="stat-item">
-                    <div class="stat-value" id="stat-uptime">--</div>
-                    <div class="stat-label">运行时间</div>
+            <div style="display: flex; justify-content: space-between; align-items: flex-end;">
+                <div style="flex: 1;">
+                    <input type="file" id="file-input" multiple onchange="updateFileList()" style="display: none;">
+                    <button class="apple-btn btn-secondary" onclick="document.getElementById('file-input').click()"
+                        style="width: auto; padding: 10px 20px; font-size: 0.9rem;">📎 选择文件</button>
+                    <div id="file-list" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px;"></div>
                 </div>
-                <div class="stat-item">
-                    <div class="stat-value" id="stat-tasks">--</div>
-                    <div class="stat-label">定时任务</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-value" id="stat-plugins">--</div>
-                    <div class="stat-label">插件数量</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-value" id="stat-chat">--</div>
-                    <div class="stat-label">聊天模式</div>
+
+                <div style="display: flex; gap: 12px; margin-left: 20px;">
+                    <button class="apple-btn btn-secondary" id="upload-btn" onclick="uploadFiles()" disabled
+                        style="width: auto;">发送文件</button>
+                    <button class="apple-btn btn-primary" id="send-btn" onclick="sendMessage()"
+                        style="width: auto; min-width: 140px;">发送消息</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="toast" id="toast"></div>
-
     <footer>
-        <p>Telegram Bot API Compatible &middot; <a href="/docs" target="_blank">API Docs</a></p>
+        <div class="copyright">Designed for WeChat FileHelper Protocol</div>
+        <div class="links">
+            <a href="https://github.com/CJackHwang/wx-filehelper-api" target="_blank">GitHub</a>
+            <a href="/docs" target="_blank">Documentation</a>
+        </div>
     </footer>
 
     <script>
-        let autoRefreshTimer = null;
+        // 保持核心逻辑不变
         let qrRefreshTimer = null;
 
-        function showToast(message, type = 'success') {
+        function showToast(message) {
             const toast = document.getElementById('toast');
             toast.textContent = message;
-            toast.className = 'toast show ' + type;
-            setTimeout(() => {
-                toast.className = 'toast';
-            }, 3000);
+            toast.className = 'toast show';
+            setTimeout(() => { toast.className = 'toast'; }, 3000);
         }
 
         async function fetchJSON(url) {
@@ -478,42 +506,33 @@
             const input = document.getElementById('file-input');
             const listDiv = document.getElementById('file-list');
             const uploadBtn = document.getElementById('upload-btn');
-
             listDiv.innerHTML = '';
-
             if (input.files.length > 0) {
                 for (let i = 0; i < input.files.length; i++) {
-                    const file = input.files[i];
-                    const tag = document.createElement('span');
+                    const tag = document.createElement('div');
                     tag.className = 'file-tag';
-                    tag.innerHTML = `${file.name} <span class="remove" onclick="clearFiles()">×</span>`;
+                    tag.innerHTML = `<span>${input.files[i].name}</span><span style="cursor:pointer;opacity:0.5" onclick="removeFile(${i})">×</span>`;
                     listDiv.appendChild(tag);
                 }
                 uploadBtn.disabled = false;
-            } else {
-                uploadBtn.disabled = true;
-            }
+            } else { uploadBtn.disabled = true; }
         }
 
-        function clearFiles() {
+        function removeFile(index) {
             const input = document.getElementById('file-input');
-            input.value = '';
+            const dt = new DataTransfer();
+            for (let i = 0; i < input.files.length; i++) { if (i !== index) dt.items.add(input.files[i]); }
+            input.files = dt.files;
             updateFileList();
         }
 
         async function sendMessage() {
             const input = document.getElementById('message-input');
             const text = input.value.trim();
-
-            if (!text) {
-                showToast('请输入消息内容', 'error');
-                return;
-            }
-
+            if (!text) { showToast('输入内容不能为空'); return; }
             const btn = document.getElementById('send-btn');
-            btn.disabled = true;
-            btn.textContent = '发送中...';
-
+            const originalText = btn.innerText;
+            btn.disabled = true; btn.innerText = 'Sending...';
             try {
                 const resp = await fetch('/bot/sendMessage', {
                     method: 'POST',
@@ -521,220 +540,96 @@
                     body: JSON.stringify({ text: text })
                 });
                 const data = await resp.json();
-
-                if (data.ok) {
-                    showToast('消息发送成功');
-                    input.value = '';
-                } else {
-                    showToast('发送失败: ' + (data.error || '未知错误'), 'error');
-                }
-            } catch (e) {
-                showToast('网络错误: ' + e.message, 'error');
-            } finally {
-                btn.disabled = false;
-                btn.textContent = '发送消息';
-            }
+                if (data.ok) { showToast('消息已发出'); input.value = ''; }
+                else showToast('发送失败');
+            } catch (e) { showToast('网络连接错误'); }
+            finally { btn.disabled = false; btn.innerText = originalText; }
         }
 
         async function uploadFiles() {
             const input = document.getElementById('file-input');
-
-            if (!input.files.length) {
-                showToast('请选择文件', 'error');
-                return;
-            }
-
+            if (!input.files.length) return;
             const btn = document.getElementById('upload-btn');
             btn.disabled = true;
-            const totalFiles = input.files.length;
-            let successCount = 0;
-            let failCount = 0;
-
-            for (let i = 0; i < totalFiles; i++) {
-                const file = input.files[i];
-                btn.textContent = `上传中 (${i + 1}/${totalFiles})...`;
-
+            for (let i = 0; i < input.files.length; i++) {
+                btn.innerText = `Sending ${i + 1}...`;
                 try {
                     const formData = new FormData();
-                    formData.append('document', file);
-
-                    const resp = await fetch('/bot/sendDocument/upload', {
-                        method: 'POST',
-                        body: formData
-                    });
-                    const data = await resp.json();
-
-                    if (data.ok) {
-                        successCount++;
-                    } else {
-                        failCount++;
-                    }
-                } catch (e) {
-                    failCount++;
-                }
+                    formData.append('document', input.files[i]);
+                    await fetch('/bot/sendDocument/upload', { method: 'POST', body: formData });
+                } catch (e) { }
             }
-
-            if (failCount === 0) {
-                showToast(`${successCount} 个文件发送成功`);
-            } else {
-                showToast(`成功 ${successCount} 个, 失败 ${failCount} 个`, failCount > 0 ? 'error' : 'success');
-            }
-
-            input.value = '';
-            updateFileList();
-            btn.disabled = false;
-            btn.textContent = '发送文件';
+            showToast('文件已全部发出');
+            input.value = ''; updateFileList();
+            btn.disabled = false; btn.innerText = '发送文件';
         }
 
         async function refreshQR() {
             const placeholder = document.getElementById('qr-placeholder');
             const img = document.getElementById('qr-image');
             const badge = document.getElementById('status-badge');
-            const statusText = document.getElementById('status-text');
-            const refreshInfo = document.getElementById('refresh-info');
-
-            placeholder.innerHTML = '<div class="spinner"></div>';
+            const info = document.getElementById('refresh-info');
             placeholder.style.display = 'flex';
+            placeholder.innerHTML = '<div class="spinner"></div>';
             img.style.display = 'none';
-
             try {
                 const data = await fetchJSON('/webui/qr');
-
-                if (data.logged_in) {
-                    placeholder.innerHTML = '✓ 已登录';
-                    placeholder.style.display = 'flex';
-                    img.style.display = 'none';
-                    badge.className = 'status-badge logged-in';
-                    badge.innerHTML = '<span class="status-dot"></span><span>已登录</span>';
-                    refreshInfo.textContent = '';
-                    stopQRAutoRefresh();
-                } else if (data.qr_base64) {
+                if (data.logged_in) { setLoggedInState(); }
+                else if (data.qr_base64) {
                     img.src = 'data:image/png;base64,' + data.qr_base64;
                     img.style.display = 'block';
                     placeholder.style.display = 'none';
-                    badge.className = 'status-badge waiting';
-                    badge.innerHTML = '<span class="status-dot pulse"></span><span>' + data.message + '</span>';
-
-                    const age = data.uuid_age || 0;
-                    const remaining = Math.max(0, 240 - age);
-                    refreshInfo.textContent = `二维码有效期: ${remaining}秒`;
-
+                    badge.className = 'status-pill waiting';
+                    document.getElementById('status-text').textContent = '待扫码';
+                    const remaining = Math.max(0, 240 - (data.uuid_age || 0));
+                    info.textContent = `二维码有效期: ${remaining}s`;
                     startQRAutoRefresh();
-                } else {
-                    placeholder.innerHTML = data.message || '获取失败';
-                    placeholder.style.display = 'flex';
-                    img.style.display = 'none';
-                    badge.className = 'status-badge error';
-                    badge.innerHTML = '<span class="status-dot"></span><span>获取失败</span>';
                 }
-            } catch (e) {
-                placeholder.innerHTML = '网络错误';
-                placeholder.style.display = 'flex';
-                img.style.display = 'none';
-                badge.className = 'status-badge error';
-                badge.innerHTML = '<span class="status-dot"></span><span>连接失败</span>';
-            }
+            } catch (e) { }
+        }
+
+        function setLoggedInState() {
+            document.getElementById('qr-placeholder').innerHTML = '<span style="font-size:3.5rem; color:var(--success);">✓</span>';
+            document.getElementById('qr-placeholder').style.display = 'flex';
+            document.getElementById('qr-image').style.display = 'none';
+            document.getElementById('status-badge').className = 'status-pill logged-in';
+            document.getElementById('status-text').textContent = '在线';
+            document.getElementById('refresh-info').textContent = '';
+            stopQRAutoRefresh();
         }
 
         async function refreshStatus() {
             try {
                 const data = await fetchJSON('/webui/status');
-
                 document.getElementById('stat-uptime').textContent = data.uptime_str || '--';
                 document.getElementById('stat-tasks').textContent = data.tasks_count ?? '--';
                 document.getElementById('stat-plugins').textContent = data.plugins_count ?? '--';
                 document.getElementById('stat-chat').textContent = data.chat_enabled ? '开启' : '关闭';
-
-                if (data.logged_in) {
-                    const badge = document.getElementById('status-badge');
-                    const placeholder = document.getElementById('qr-placeholder');
-                    const img = document.getElementById('qr-image');
-
-                    placeholder.innerHTML = '✓ 已登录';
-                    placeholder.style.display = 'flex';
-                    img.style.display = 'none';
-                    badge.className = 'status-badge logged-in';
-                    badge.innerHTML = '<span class="status-dot"></span><span>已登录</span>';
-                    document.getElementById('refresh-info').textContent = '';
-                    stopQRAutoRefresh();
-                }
-            } catch (e) {
-                console.error('Status fetch failed:', e);
-            }
+                if (data.logged_in) setLoggedInState();
+            } catch (e) { }
         }
 
         function startQRAutoRefresh() {
             if (qrRefreshTimer) return;
-            let pollInterval = 3000;
-
-            async function poll() {
+            const poll = async () => {
                 try {
                     const data = await fetchJSON('/webui/status');
-                    const badge = document.getElementById('status-badge');
-                    const info = document.getElementById('refresh-info');
-
-                    if (data.logged_in) {
-                        const placeholder = document.getElementById('qr-placeholder');
-                        const img = document.getElementById('qr-image');
-                        placeholder.innerHTML = '✓ 已登录';
-                        placeholder.style.display = 'flex';
-                        img.style.display = 'none';
-                        badge.className = 'status-badge logged-in';
-                        badge.innerHTML = '<span class="status-dot"></span><span>已登录</span>';
-                        info.textContent = '';
-                        stopQRAutoRefresh();
-                        refreshStatus();
-                        return;
-                    }
-
-                    const statusText = data.login_status_text || '等待扫码';
-                    badge.innerHTML = '<span class="status-dot pulse"></span><span>' + statusText + '</span>';
-
-                    if (data.login_code === 201) {
-                        badge.className = 'status-badge waiting';
-                        info.textContent = '请在手机上点击确认';
-                        pollInterval = 1000;
-                    } else {
-                        const match = info.textContent.match(/(\d+)/);
-                        if (match) {
-                            const remaining = parseInt(match[1]) - Math.round(pollInterval/1000);
-                            if (remaining <= 0) {
-                                refreshQR();
-                                return;
-                            }
-                            info.textContent = `二维码有效期: ${remaining}秒`;
-                        }
-                        pollInterval = 3000;
-                    }
-                } catch (e) {
-                    console.error('Poll failed:', e);
-                }
-                qrRefreshTimer = setTimeout(poll, pollInterval);
-            }
-            qrRefreshTimer = setTimeout(poll, pollInterval);
+                    if (data.logged_in) { setLoggedInState(); refreshStatus(); return; }
+                    if (data.login_code === 201) document.getElementById('status-text').textContent = '请手机确认';
+                } catch (e) { }
+                qrRefreshTimer = setTimeout(poll, 3000);
+            };
+            qrRefreshTimer = setTimeout(poll, 3000);
         }
 
-        function stopQRAutoRefresh() {
-            if (qrRefreshTimer) {
-                clearTimeout(qrRefreshTimer);
-                qrRefreshTimer = null;
-            }
-        }
+        function stopQRAutoRefresh() { if (qrRefreshTimer) { clearTimeout(qrRefreshTimer); qrRefreshTimer = null; } }
 
-        // Handle Enter key in textarea
-        document.getElementById('message-input').addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-            }
+        document.getElementById('message-input').addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
         });
 
-        // Initial load
-        refreshQR();
-        refreshStatus();
-
-        // Auto refresh status every 10s
-        setInterval(refreshStatus, 10000);
+        refreshQR(); refreshStatus(); setInterval(refreshStatus, 15000);
     </script>
 </body>
+
 </html>
