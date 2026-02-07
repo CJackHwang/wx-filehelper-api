@@ -214,7 +214,7 @@ async def cmd_about(ctx: CommandContext) -> str:
 兼容 Telegram Bot API 标准
 
 版本: {config.version}
-项目: https://github.com/user/wechat-filehelper-api
+项目: https://github.com/CJackHwang/wx-filehelper-api
 
 【特性】
 • Telegram Bot API 兼容
