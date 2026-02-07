@@ -7,24 +7,30 @@ import platform
 import time
 from datetime import datetime
 
-from plugin_base import command, CommandContext
+from plugin_base import command, CommandContext, get_config
 
 
 # === 菜单与导航 ===
 
 @command("start", description="开始使用", aliases=["menu", "主菜单"])
 async def cmd_start(ctx: CommandContext) -> str:
-    """主菜单 - 类似 Telegram /start"""
-    return """📋 FileHelper Bot v2.0
+    """主菜单 - Telegram /start"""
+    config = get_config()
+    return f"""🤖 {config.app_name} v{config.version}
 
 欢迎使用文件传输助手机器人！
 
-【快捷入口】
-/status - 查看状态
+【Telegram 标准命令】
 /help - 命令列表
-/m - 快捷菜单
+/settings - 查看设置
+/about - 关于本 Bot
 
-【功能分类】
+【快捷入口】
+/status - 服务器状态
+/chat on - 开启 AI 聊天
+/task list - 定时任务
+
+【分类菜单】
 /m server - 服务器管理
 /m file - 文件操作
 /m task - 定时任务
@@ -160,33 +166,101 @@ async def cmd_ping(ctx: CommandContext) -> str:
     return "pong"
 
 
+# === Telegram 标准命令 ===
+
+
+@command("settings", description="查看设置")
+async def cmd_settings(ctx: CommandContext) -> str:
+    """设置面板 - Telegram 标准命令"""
+    processor = ctx.processor
+    config = get_config()
+
+    return f"""⚙️ 当前设置
+
+【聊天模式】
+状态: {'开启' if processor.chat_enabled else '关闭'}
+Webhook: {'已配置' if processor.chat_webhook_url else '未配置'}
+切换: /chat on|off
+
+【定时任务】
+任务数: {len(processor.tasks)}
+管理: /task list
+
+【文件管理】
+下载目录: {config.download_dir}
+自动下载: {'是' if config.auto_download else '否'}
+按日期分目录: {'是' if config.file_date_subdir else '否'}
+保留天数: {config.file_retention_days or '永久'}
+
+【服务器】
+标签: {processor.server_label}
+心跳间隔: {config.heartbeat_interval}s
+重连延迟: {config.reconnect_delay}s"""
+
+
+@command("cancel", description="取消当前操作")
+async def cmd_cancel(ctx: CommandContext) -> str:
+    """取消操作 - Telegram 标准命令"""
+    return "没有正在进行的操作。"
+
+
+@command("about", description="关于本 Bot")
+async def cmd_about(ctx: CommandContext) -> str:
+    """关于信息 - Telegram 标准命令"""
+    config = get_config()
+    return f"""🤖 {config.app_name}
+
+基于微信文件传输助手的 Bot API 框架
+兼容 Telegram Bot API 标准
+
+版本: {config.version}
+项目: https://github.com/user/wechat-filehelper-api
+
+【特性】
+• Telegram Bot API 兼容
+• 插件系统 (命令/消息处理/HTTP路由)
+• 消息持久化 (SQLite)
+• 自动文件下载
+• 定时任务调度
+• 心跳检测与自动重连"""
+
+
+@command("version", description="版本信息", aliases=["ver", "v"])
+async def cmd_version(ctx: CommandContext) -> str:
+    """版本信息 - Telegram 标准命令"""
+    config = get_config()
+    return f"{config.app_name} v{config.version}"
+
+
 @command("help", description="命令列表", aliases=["h", "?"])
 async def cmd_help(ctx: CommandContext) -> str:
     """命令列表 - 简洁版"""
     return """📖 命令列表
 
-【导航】
-/start - 主菜单
-/m - 分类菜单
-/help - 本列表
+【Telegram 标准】
+/start - 开始使用
+/help - 命令列表
+/settings - 查看设置
+/cancel - 取消操作
+/about - 关于本 Bot
+/version - 版本信息
 
-【常用】
+【常用功能】
 /status - 服务器状态
-/task list - 定时任务
 /chat on|off - 聊天模式
-/ask <问题> - 问答
+/ask <问题> - AI 问答
+/task list - 定时任务
 
-【文件】
-/sendfile <名称> - 发送文件
+【文件操作】
+/sendfile <路径> - 发送文件
 
 【工具】
-/time /calc /uuid /ip
+/time /calc /uuid /ip /ping
 
 【管理】
 /plugins - 插件状态
 /reload - 重载插件
-
-提示: /m <分类> 查看详细说明"""
+/m <分类> - 分类菜单"""
 
 
 @command("echo", description="回显消息", usage="/echo <text>")

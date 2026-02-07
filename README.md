@@ -1,33 +1,70 @@
 # WeChat FileHelper Bot API
 
-基于微信文件传输助手的 Bot API，接口设计遵循 [Telegram Bot API](https://core.telegram.org/bots/api) 标准。
+基于微信文件传输助手的 Bot API 框架，接口设计遵循 [Telegram Bot API](https://core.telegram.org/bots/api) 标准。
+
+## 特性
+
+- **Telegram Bot API 兼容** - 支持 sendMessage、sendDocument、getUpdates 等标准接口
+- **插件系统** - 命令、消息处理器、HTTP 路由均可插件化
+- **消息持久化** - SQLite 存储历史消息和文件元数据
+- **自动文件下载** - 收到的文件自动保存到本地
+- **定时任务** - 支持 Cron 式定时执行命令
+- **稳定性增强** - 心跳检测、自动重连、会话保存
+
+---
 
 ## 快速开始
 
 ```bash
+# 安装依赖
 pip install -r requirements.txt
+
+# 启动服务
 python main.py
 ```
 
 服务启动后访问 `http://127.0.0.1:8000`
 
-## 登录
+### 登录微信
 
 ```bash
 # 获取二维码
-curl http://127.0.0.1:8000/wechat/qr -o qr.png
+curl http://127.0.0.1:8000/qr -o qr.png
 
-# 检查登录状态
-curl http://127.0.0.1:8000/wechat/login/status
+# 用微信扫描二维码后检查状态
+curl http://127.0.0.1:8000/login/status
 ```
 
 ---
 
-## Available Methods
+## 项目结构
 
-### Getting Updates
+```
+wechat-filehelper-api/
+├── main.py              # FastAPI 入口
+├── config.py            # 统一配置管理
+├── background.py        # 后台任务 (监听/心跳/清理)
+├── processor.py         # 命令处理器
+├── direct_bot.py        # WeChat 协议实现
+├── message_store.py     # SQLite 消息持久化
+├── plugin_base.py       # 插件基类
+├── plugin_loader.py     # 插件加载器
+├── filehelper_sdk.py    # Python SDK
+├── routes/
+│   ├── bot.py           # Telegram Bot API 兼容
+│   ├── wechat.py        # 微信扩展接口
+│   └── files.py         # 文件管理接口
+└── plugins/
+    ├── builtin.py       # 内置命令
+    ├── example.py       # 示例插件
+    └── framework_api.py # 框架管理 API (可选)
+```
 
-#### getUpdates
+---
+
+## Telegram Bot API
+
+### 获取更新
 
 ```
 GET /bot/getUpdates
@@ -35,30 +72,13 @@ GET /bot/getUpdates
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| offset | Integer | Optional | Identifier of the first update to be returned |
-| limit | Integer | Optional | Limits the number of updates (1-100, default 100) |
-| timeout | Integer | Optional | Timeout in seconds for long polling |
-| allowed_updates | Array of String | Optional | List of update types to receive |
+| offset | Integer | Optional | 起始更新 ID |
+| limit | Integer | Optional | 限制数量 (1-100) |
+| timeout | Integer | Optional | 长轮询超时 |
 
-**Returns:** Array of [Update](#update) objects
+**Returns:** Array of Update objects
 
----
-
-### Available Methods
-
-#### getMe
-
-```
-GET /bot/getMe
-```
-
-Returns basic information about the bot.
-
-**Returns:** [User](#user) object
-
----
-
-#### sendMessage
+### 发送消息
 
 ```
 POST /bot/sendMessage
@@ -66,257 +86,234 @@ POST /bot/sendMessage
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| chat_id | Integer or String | Optional | Ignored (only filehelper) |
-| text | String | Yes | Text of the message |
-| parse_mode | String | Optional | Ignored |
-| reply_to_message_id | Integer | Optional | Message ID to reply to |
-| disable_notification | Boolean | Optional | Ignored |
+| text | String | Yes | 消息内容 |
+| chat_id | String | Optional | 忽略 (仅 filehelper) |
+| reply_to_message_id | String | Optional | 回复消息 ID |
 
-**Returns:** [Message](#message) object
-
----
-
-#### sendPhoto
-
-```
-POST /bot/sendPhoto
-```
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| chat_id | Integer or String | Optional | Ignored |
-| photo | String | Yes | File path to the photo |
-| caption | String | Optional | Photo caption |
-| reply_to_message_id | Integer | Optional | Message ID to reply to |
-
-**Returns:** [Message](#message) object
-
----
-
-#### sendDocument
+### 发送文件
 
 ```
 POST /bot/sendDocument
 ```
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| chat_id | Integer or String | Optional | Ignored |
-| document | String | Yes | File path to the document |
-| caption | String | Optional | Document caption |
-| reply_to_message_id | Integer | Optional | Message ID to reply to |
-
-**Returns:** [Message](#message) object
-
----
-
-#### getFile
-
-```
-GET /bot/getFile
-```
+**JSON 模式:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| file_id | String | Yes | File identifier |
+| document | String | Yes | 文件路径 |
+| caption | String | Optional | 文件说明 |
 
-**Returns:** [File](#file) object
+**Multipart 上传模式:**
+
+```
+POST /bot/sendDocument/upload
+Content-Type: multipart/form-data
+```
+
+```bash
+curl -X POST http://127.0.0.1:8000/bot/sendDocument/upload \
+  -F "document=@/path/to/file.pdf" \
+  -F "caption=文件说明"
+```
+
+### 发送图片
+
+```
+POST /bot/sendPhoto
+POST /bot/sendPhoto/upload  # Multipart 上传
+```
+
+### 其他接口
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /bot/getMe` | 获取 Bot 信息 |
+| `GET /bot/getChat` | 获取 Chat 信息 |
+| `GET /bot/getFile` | 获取文件信息 |
+| `POST /bot/setWebhook` | 设置 Webhook |
+| `POST /bot/deleteWebhook` | 删除 Webhook |
+| `GET /bot/getWebhookInfo` | 获取 Webhook 信息 |
+| `POST /bot/copyMessage` | 复制消息 |
 
 ---
 
-#### getChat
+## 微信扩展接口
+
+### 登录管理
 
 ```
-GET /bot/getChat
-```
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| chat_id | Integer or String | Optional | Ignored |
-
-**Returns:** [Chat](#chat) object
-
----
-
-#### setWebhook
-
-```
-POST /bot/setWebhook
-```
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| url | String | Yes | HTTPS URL to send updates to |
-| certificate | String | Optional | Ignored |
-| ip_address | String | Optional | Ignored |
-| max_connections | Integer | Optional | Ignored |
-| allowed_updates | Array of String | Optional | Ignored |
-| drop_pending_updates | Boolean | Optional | Ignored |
-| secret_token | String | Optional | Ignored |
-
-**Returns:** True on success
-
----
-
-#### deleteWebhook
-
-```
-POST /bot/deleteWebhook
-```
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| drop_pending_updates | Boolean | Optional | Ignored |
-
-**Returns:** True on success
-
----
-
-#### getWebhookInfo
-
-```
-GET /bot/getWebhookInfo
-```
-
-**Returns:** [WebhookInfo](#webhookinfo) object
-
----
-
-## Types
-
-### Update
-
-| Field | Type | Description |
-|-------|------|-------------|
-| update_id | Integer | Update's unique identifier |
-| message | Message | Optional. New incoming message |
-
-### User
-
-| Field | Type | Description |
-|-------|------|-------------|
-| id | Integer | User identifier |
-| is_bot | Boolean | True if this is a bot |
-| first_name | String | User's first name |
-| username | String | Optional. Username |
-
-### Chat
-
-| Field | Type | Description |
-|-------|------|-------------|
-| id | Integer | Chat identifier |
-| type | String | Type of chat: "private" |
-| first_name | String | Optional. First name |
-| username | String | Optional. Username |
-
-### Message
-
-| Field | Type | Description |
-|-------|------|-------------|
-| message_id | String | Unique message identifier |
-| date | Integer | Unix timestamp |
-| text | String | Optional. Text content |
-| document | Document | Optional. Document info |
-| reply_to_message_id | String | Optional. Original message ID |
-
-### Document
-
-| Field | Type | Description |
-|-------|------|-------------|
-| file_id | String | File identifier |
-| file_unique_id | String | Unique file identifier |
-| file_name | String | Optional. Original filename |
-| file_size | Integer | Optional. File size in bytes |
-
-### File
-
-| Field | Type | Description |
-|-------|------|-------------|
-| file_id | String | File identifier |
-| file_unique_id | String | Unique file identifier |
-| file_size | Integer | Optional. File size |
-| file_path | String | File path for downloading |
-
-### WebhookInfo
-
-| Field | Type | Description |
-|-------|------|-------------|
-| url | String | Webhook URL |
-| has_custom_certificate | Boolean | Always false |
-| pending_update_count | Integer | Number of pending updates |
-
----
-
-## WeChat 扩展接口
-
-以下接口为微信特有功能，Telegram 无对应接口。
-
-### 登录
-
-```
-GET /wechat/qr                    # 获取登录二维码 (返回 PNG)
-GET /wechat/login/status          # 获取登录状态
-POST /wechat/session/save         # 保存会话
-```
-
-### 框架功能
-
-```
-GET /framework/state              # 框架状态
-POST /framework/execute           # 执行命令
-GET /framework/tasks              # 定时任务列表
-POST /framework/tasks             # 添加定时任务
-DELETE /framework/tasks/{id}      # 删除定时任务
-```
-
-### 消息存储
-
-```
-GET /store/stats                  # 存储统计
-GET /store/messages               # 查询历史消息
+GET  /wechat/qr              # 获取登录二维码 (PNG)
+GET  /wechat/login/status    # 获取登录状态
+POST /wechat/session/save    # 保存会话
 ```
 
 ### 文件管理
 
 ```
-GET /downloads                    # 下载目录文件列表
-GET /files/metadata               # 文件元数据
-DELETE /files/{msg_id}            # 删除文件
-POST /files/cleanup               # 清理过期文件
+GET    /downloads            # 下载目录文件列表
+GET    /files/metadata       # 文件元数据 (数据库)
+DELETE /files/{msg_id}       # 删除文件
+POST   /files/cleanup        # 清理过期文件
+```
+
+### 消息存储
+
+```
+GET /store/stats             # 存储统计
+GET /store/messages          # 查询历史消息
+```
+
+---
+
+## 框架管理 API
+
+> 这些接口由 `plugins/framework_api.py` 提供，删除该文件可禁用。
+
+### 框架状态
+
+```
+GET  /framework/state        # 框架状态
+POST /framework/chat_mode    # 开关聊天模式
+POST /framework/execute      # 执行命令
+```
+
+### 定时任务
+
+```
+GET    /framework/tasks              # 任务列表
+POST   /framework/tasks              # 添加任务
+DELETE /framework/tasks/{id}         # 删除任务
+POST   /framework/tasks/{id}/enabled # 启用/禁用
+POST   /framework/tasks/{id}/run     # 立即执行
 ```
 
 ### 插件管理
 
 ```
-GET /plugins                      # 已加载插件
-POST /plugins/reload              # 重新加载插件
+GET  /plugins                # 已加载插件
+POST /plugins/reload         # 重新加载插件
 ```
 
 ### 健康检查
 
 ```
-GET /health                       # 健康状态
-GET /stability                    # 稳定性信息
+GET /health                  # 健康状态
+GET /stability               # 稳定性信息
+```
+
+### 调试
+
+```
+GET  /trace/status           # 追踪状态
+GET  /trace/recent           # 最近追踪记录
+POST /trace/clear            # 清除追踪
 ```
 
 ---
 
-## 不支持的 Telegram 方法
+## 插件开发
 
-以下方法因微信限制无法实现：
+### 快速开始
 
-| Method | Reason |
-|--------|--------|
-| forwardMessage | 微信不支持转发标记 |
-| editMessageText | 微信不支持编辑已发送消息 |
-| deleteMessage | 不支持撤回 (超时后) |
-| sendLocation | 微信文件助手不支持位置 |
-| sendContact | 微信文件助手不支持联系人 |
-| sendPoll | 微信不支持投票 |
-| sendDice | 微信不支持骰子 |
-| Inline Mode | 微信不支持 |
-| Payments | 微信不支持 |
-| Games | 微信不支持 |
+在 `plugins/` 目录创建 `.py` 文件即可：
+
+```python
+from plugin_base import command, CommandContext
+
+@command("hello", description="打招呼")
+async def hello(ctx: CommandContext) -> str:
+    return f"Hello, {ctx.args[0] if ctx.args else 'World'}!"
+```
+
+### 完整示例
+
+```python
+from plugin_base import (
+    command,           # 命令装饰器
+    on_message,        # 消息处理器装饰器
+    route,             # HTTP 路由装饰器
+    on_load,           # 加载钩子
+    on_unload,         # 卸载钩子
+    CommandContext,    # 命令上下文
+    get_bot,           # 获取 Bot 实例
+    get_processor,     # 获取处理器
+    get_config,        # 获取配置
+)
+
+
+# === 生命周期钩子 ===
+
+@on_load
+async def init():
+    print("插件已加载")
+    # 初始化资源、连接数据库等
+
+@on_unload
+async def cleanup():
+    print("插件即将卸载")
+    # 清理资源
+
+
+# === 命令 ===
+
+@command("greet", description="问候", aliases=["hi", "hello"])
+async def cmd_greet(ctx: CommandContext) -> str:
+    name = ctx.args[0] if ctx.args else "World"
+    return f"Hello, {name}!"
+
+
+# === 消息处理器 ===
+
+@on_message(priority=100, name="spam_filter")
+async def filter_spam(ctx: CommandContext) -> str | None:
+    if "广告" in ctx.text:
+        return "检测到垃圾消息"
+    return None  # 返回 None 继续后续处理
+
+
+# === HTTP 路由 ===
+
+@route("GET", "/my-plugin/status", tags=["MyPlugin"])
+async def status():
+    config = get_config()
+    return {
+        "plugin": "my-plugin",
+        "server": config.server_label,
+    }
+
+@route("POST", "/my-plugin/action", tags=["MyPlugin"])
+async def action(text: str = ""):
+    bot = get_bot()
+    await bot.send_text(text)
+    return {"sent": True}
+```
+
+### 可用 API
+
+| 函数 | 说明 |
+|------|------|
+| `get_bot()` | 获取 WeChatHelperBot 实例 |
+| `get_processor()` | 获取 CommandProcessor 实例 |
+| `get_config()` | 获取配置实例 |
+
+### CommandContext 字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `text` | str | 原始文本 |
+| `command` | str | 命令名 (不含 /) |
+| `args` | list[str] | 参数列表 |
+| `msg` | dict | 原始消息对象 |
+| `msg_id` | str | 消息 ID |
+| `is_command` | bool | 是否为命令调用 |
+| `bot` | Any | Bot 实例 |
+| `processor` | Any | 处理器实例 |
+
+### 热重载
+
+```bash
+curl -X POST http://127.0.0.1:8000/plugins/reload
+```
 
 ---
 
@@ -327,13 +324,13 @@ from filehelper_sdk import Bot
 
 bot = Bot("http://127.0.0.1:8000")
 
-# Send message
+# 发送消息
 bot.send_message(text="Hello!")
 
-# Send document
-bot.send_document(document="/path/to/file.pdf", caption="Check this out")
+# 发送文件
+bot.send_document(document="/path/to/file.pdf", caption="附件")
 
-# Get updates
+# 获取更新
 updates = bot.get_updates()
 for update in updates:
     print(update.message.text)
@@ -348,7 +345,7 @@ bot = Bot("http://127.0.0.1:8000")
 
 def handle_message(update: Update):
     if update.message.text == "ping":
-        bot.send_message(text="pong", reply_to_message_id=update.message.message_id)
+        bot.send_message(text="pong")
 
 updater = Updater(bot)
 updater.add_handler(handle_message)
@@ -357,34 +354,62 @@ updater.start_polling()
 
 ---
 
-## 插件开发
-
-在 `plugins/` 目录创建 `.py` 文件：
-
-```python
-from plugin_base import command, CommandContext
-
-@command("hello", description="Say hello")
-async def cmd_hello(ctx: CommandContext) -> str:
-    return f"Hello, {ctx.args[0] if ctx.args else 'World'}!"
-```
-
-重启服务或调用 `POST /plugins/reload` 生效。
-
----
-
 ## 环境变量
+
+### 基础配置
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `WECHAT_ENTRY_HOST` | `szfilehelper.weixin.qq.com` | WeChat entry host |
-| `DOWNLOAD_DIR` | `./downloads` | Download directory |
-| `MESSAGE_DB_PATH` | `./messages.db` | SQLite database path |
-| `PLUGINS_DIR` | `./plugins` | Plugins directory |
-| `MESSAGE_WEBHOOK_URL` | - | Webhook URL for updates |
-| `CHATBOT_WEBHOOK_URL` | - | Webhook for chat replies |
-| `HEARTBEAT_INTERVAL` | `30` | Heartbeat interval (seconds) |
-| `MAX_RECONNECT_ATTEMPTS` | `10` | Max reconnection attempts |
+| `WECHAT_ENTRY_HOST` | `szfilehelper.weixin.qq.com` | 微信入口主机 |
+| `DOWNLOAD_DIR` | `./downloads` | 下载目录 |
+| `MESSAGE_DB_PATH` | `./messages.db` | 数据库路径 |
+| `PLUGINS_DIR` | `./plugins` | 插件目录 |
+
+### 稳定性
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HEARTBEAT_INTERVAL` | `30` | 心跳间隔 (秒) |
+| `RECONNECT_DELAY` | `5` | 重连延迟 (秒) |
+| `MAX_RECONNECT_ATTEMPTS` | `10` | 最大重连次数 |
+
+### 文件管理
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUTO_DOWNLOAD` | `true` | 自动下载文件 |
+| `FILE_DATE_SUBDIR` | `true` | 按日期分目录 |
+| `FILE_RETENTION_DAYS` | `0` | 文件保留天数 (0=永久) |
+
+### Webhook
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MESSAGE_WEBHOOK_URL` | - | 消息推送 Webhook |
+| `CHATBOT_WEBHOOK_URL` | - | AI 聊天 Webhook |
+| `CHATBOT_ENABLED` | `false` | 启用 AI 聊天 |
+
+### 调试
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WECHAT_TRACE_ENABLED` | `true` | 启用请求追踪 |
+| `WECHAT_TRACE_REDACT` | `true` | 脱敏敏感数据 |
+
+---
+
+## 不支持的 Telegram 方法
+
+| Method | Reason |
+|--------|--------|
+| forwardMessage | 微信不支持转发标记 |
+| editMessageText | 微信不支持编辑已发送消息 |
+| deleteMessage | 不支持撤回 (超时后) |
+| sendLocation | 文件助手不支持位置 |
+| sendContact | 文件助手不支持联系人 |
+| sendPoll | 微信不支持投票 |
+| Inline Mode | 微信不支持 |
+| Payments | 微信不支持 |
 
 ---
 
