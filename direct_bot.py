@@ -209,13 +209,22 @@ class WeChatHelperBot:
             except Exception:
                 continue
 
-    async def get_login_qr(self) -> bytes:
+    async def get_login_qr(self, skip_login_check: bool = False) -> bytes:
+        """
+        获取登录二维码
+
+        Args:
+            skip_login_check: 跳过登录状态检查 (加速获取)
+        """
         if not self.client:
             raise RuntimeError("Client not initialized")
 
-        if await self.check_login_status():
-            return b""
+        # 快速检查: 已有认证信息则认为已登录
+        if not skip_login_check:
+            if self._has_auth() and self.is_logged_in:
+                return b""
 
+        # UUID 不存在或过期 (>240s) 时重新获取
         if not self.uuid or (time.time() - self.uuid_ts > 240):
             await self._jslogin_get_uuid()
             self.last_login_message = "qr_ready"
