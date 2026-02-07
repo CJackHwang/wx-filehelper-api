@@ -276,3 +276,55 @@ async def cmd_reload(ctx: CommandContext) -> str:
     ctx.processor.plugin_loader.reload_all()
     status = ctx.processor.plugin_loader.get_status()
     return f"已重新加载 {status['loaded_count']} 个插件, {status['commands_count']} 个命令"
+
+
+@command("download", description="文件接收开关", usage="/download on|off|status")
+async def cmd_download(ctx: CommandContext) -> str:
+    """控制自动文件下载功能"""
+    from main import background_tasks
+
+    if not ctx.args:
+        status = "开启" if background_tasks.auto_download else "关闭"
+        return f"文件自动接收: {status}\n用法: /download on|off"
+
+    action = ctx.args[0].lower()
+    if action in {"on", "enable", "1"}:
+        background_tasks.auto_download = True
+        return "文件自动接收已开启"
+    if action in {"off", "disable", "0"}:
+        background_tasks.auto_download = False
+        return "文件自动接收已关闭"
+    if action in {"status", "state"}:
+        status = "开启" if background_tasks.auto_download else "关闭"
+        return f"文件自动接收: {status}"
+
+    return "用法: /download on|off|status"
+
+
+@command("debug", description="调试文件传输", usage="/debug", hidden=True)
+async def cmd_debug(ctx: CommandContext) -> str:
+    """调试命令 - 测试图片和文件发送"""
+    from pathlib import Path
+
+    bot = ctx.bot
+    results = []
+
+    # 发送测试图片
+    test_image = Path(__file__).parent.parent / "bishengke-test.jpg"
+    if test_image.exists():
+        ok = await bot.send_file(str(test_image))
+        results.append(f"图片发送: {'成功' if ok else '失败'}")
+    else:
+        results.append(f"图片不存在: {test_image}")
+
+    # 创建并发送测试文本文件
+    test_txt = Path(__file__).parent.parent / "downloads" / "郑重声明.txt"
+    test_txt.parent.mkdir(parents=True, exist_ok=True)
+    test_txt.write_text(
+        "马爸爸我给你腾讯充那么多钱你别搞我仓库真的求你了",
+        encoding="utf-8"
+    )
+    ok = await bot.send_file(str(test_txt))
+    results.append(f"文件发送: {'成功' if ok else '失败'}")
+
+    return "调试完成\n" + "\n".join(results)

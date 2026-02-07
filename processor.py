@@ -221,6 +221,10 @@ class CommandProcessor:
                 print(f"[Processor] Command {cmd} error: {exc}")
                 return f"命令执行出错: {exc}"
 
+        # 未知命令反馈 (类似 Telegram)
+        if is_command:
+            return f"未知命令: /{cmd}\n输入 /help 查看可用命令。"
+
         # 聊天模式
         if allow_chat and self.chat_enabled:
             return await self._chat_reply(text=raw, source_msg=msg or {})

@@ -147,11 +147,19 @@ class BackgroundTasks:
                         had_messages = True
 
                         # 自动下载文件
+                        file_feedback = None
                         if self.auto_download and msg.get("type") in {"image", "file"}:
-                            await self._handle_file_download(msg, msg_id, unique_key, len(processed_order))
+                            file_feedback = await self._handle_file_download(msg, msg_id, unique_key, len(processed_order))
 
                         # 处理消息
                         reply = await self.processor.process(msg)
+
+                        # 合并文件反馈和命令回复
+                        if file_feedback and reply:
+                            reply = f"{file_feedback}\n\n{reply}"
+                        elif file_feedback:
+                            reply = file_feedback
+
                         if reply:
                             ok = await self.bot.send_text(reply)
                             if ok:
@@ -180,8 +188,8 @@ class BackgroundTasks:
 
     async def _handle_file_download(
         self, msg: dict, msg_id: str, unique_key: str, order_len: int
-    ) -> None:
-        """处理文件下载"""
+    ) -> str | None:
+        """处理文件下载，返回反馈消息"""
         file_name = msg.get("file_name") or f"download_{msg_id[:8] or order_len}"
         if msg.get("type") == "image" and "." not in file_name:
             file_name += ".jpg"
@@ -203,6 +211,12 @@ class BackgroundTasks:
                 file_size=msg.get("file_size", 0),
                 mime_type=mime_type,
             )
+
+            # 返回接收成功反馈
+            file_type = "图片" if msg.get("type") == "image" else "文件"
+            return f"已接收{file_type}: {file_name}"
+
+        return None
 
     async def _periodic_session_saver(self) -> None:
         """定期保存会话"""
