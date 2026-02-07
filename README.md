@@ -307,10 +307,9 @@ GET /stability                    # 稳定性信息
 
 | Method | Reason |
 |--------|--------|
-| forwardMessage | 微信不支持转发 |
-| copyMessage | 微信不支持复制 |
+| forwardMessage | 微信不支持转发标记 |
 | editMessageText | 微信不支持编辑已发送消息 |
-| deleteMessage | 微信不支持撤回 (超时后) |
+| deleteMessage | 不支持撤回 (超时后) |
 | sendLocation | 微信文件助手不支持位置 |
 | sendContact | 微信文件助手不支持联系人 |
 | sendPoll | 微信不支持投票 |
