@@ -3,7 +3,7 @@
 基于微信文件传输助手的 Bot API 框架，接口设计遵循 [Telegram Bot API](https://core.telegram.org/bots/api) 标准。
 
 
-![mmexport1770502998277.jpg](https://github.com/user-attachments/assets/44ece52f-cb95-4db1-a74d-d1f6ecc48f54)
+![mmexport1770502998277.jpg](https://github-production-user-asset-6210df.s3.amazonaws.com/155826701/548213551-44ece52f-cb95-4db1-a74d-d1f6ecc48f54.jpg)
 
 
 ## 特性
