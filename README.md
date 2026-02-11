@@ -2,6 +2,10 @@
 
 基于微信文件传输助手的 Bot API 框架，接口设计遵循 [Telegram Bot API](https://core.telegram.org/bots/api) 标准。
 
+
+![mmexport1770502998277.jpg](https://github.com/user-attachments/assets/44ece52f-cb95-4db1-a74d-d1f6ecc48f54)
+
+
 ## 特性
 
 - **Telegram Bot API 兼容** - 支持 sendMessage、sendDocument、getUpdates 等标准接口
@@ -433,6 +437,10 @@ updater.start_polling()
 | Payments | 微信不支持 |
 
 ---
+
+内置指令效果
+
+![Screenshot_2026-02-08-05-34-23-944_com.tencent.mm-edit.jpg](https://github.com/user-attachments/assets/dff3abbc-bf1e-461c-b954-64315792b95d)
 
 ## License
 
